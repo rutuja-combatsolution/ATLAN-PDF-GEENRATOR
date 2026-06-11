@@ -1,0 +1,56 @@
+{
+    "customer_code": "24-42152",
+    "dwg_no": "42152.P.01.10.GA",
+    "request_no": "RN235218",
+    "drawn_date": "21/01/2026",
+    "project_lines": [
+        "SAMPLE DOUBLE STACK PROJECT",
+        "- SAMPLE SYSTEM DOUBLE STACK"
+    ],
+    "stack_key": "2",
+    "wide": 6,
+    "long": 13,
+    "storage_m3": 468,
+    "rev_history": [
+        ["1", "21/01/2026", "R.R.", "INITIAL RELEASE"]
+    ],
+    "parts_list": [
+        ["1", "1000L MODULE - FULL CUBE",              "156", ""],
+        ["2", "1000L MODULE - SIDE PANEL FULL HEIGHT",  "48", ""],
+        ["3", "SINGLE CONNECTOR",                      "360", ""],
+        ["4", "END CAP",                                "24", ""],
+        ["5", "INSPECTION RISER",                        "2", ""],
+        ["6", "GEOTEXTILE WRAP",                         "1", "m²"]
+    ],
+    "inlets": [
+        {
+            "id": "INLET-1",
+            "side": "left",
+            "panel_x": 0,
+            "panel_y": 2,
+            "diameter": 375,
+            "horizontal_offset": 0.0,
+            "invert_level": 0.0
+        },
+        {
+            "id": "INLET-2",
+            "side": "left",
+            "panel_x": 0,
+            "panel_y": 4,
+            "diameter": 375,
+            "horizontal_offset": 0.0,
+            "invert_level": 0.0
+        }
+    ],
+    "outlets": [
+        {
+            "id": "OUTLET-1",
+            "side": "right",
+            "panel_x": 12,
+            "panel_y": 2,
+            "diameter": 375,
+            "horizontal_offset": 0.0,
+            "invert_level": 0.0
+        }
+    ]
+}
