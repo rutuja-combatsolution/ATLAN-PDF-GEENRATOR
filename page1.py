@@ -16,7 +16,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from Internal.plan_view import draw_plan_view, plan_margins, FN, FB
-from Internal.elevation_view import draw_elevation_view, left_need
+from Internal.elevation_view import (draw_elevation_view, left_need,
+                                      ELEV_BASE, ELEV_ABOVE, ELEV_RIGHT_NEED)
 
 PW, PH = landscape(A3)
 IM = 10 * mm
@@ -35,10 +36,6 @@ NOTES = ["NOTES:",
 RIGHT_W = 276                       # width of the right-hand column
 RIGHT_X = IX1 - 8 - RIGHT_W         # its left edge
 LIMIT = RIGHT_X - 8                 # plan + elevation, labels included, stay left of this
-ELEV_RIGHT_NEED = 52                # 500 dimension, right pipe stub + arrow
-
-ELEV_BASE = 46          # room under the elevation tank: base RL label + title
-ELEV_ABOVE = 72         # room above top of storage: callouts, 500 extension
 
 COL_TOP = IY1 - 10                  # column spans from here ...
 COL_BOTTOM = TB_TOP + 5             # ... down to the stamp's bottom edge
@@ -276,4 +273,4 @@ def draw_page1(c, d):
     ey = bottom + gap3 + ELEV_BASE                       # elevation base
     elev_top = ey + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
     draw_plan_view(c, d, mx, my, s, floor_y=elev_top + 2)
-    draw_elevation_view(c, d, mx, ey, s, view="front", annotate=True)
+    draw_elevation_view(c, d, mx, ey, s, view="front")

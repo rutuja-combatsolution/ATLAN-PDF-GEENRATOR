@@ -25,8 +25,10 @@ LAYER_MM = 780            # height of one full layer
 EXC_MARGIN_MM = 525       # 500 clearance + 25 wrap, each side (ref: 31050 -> 32100)
 
 # Sign convention of `horizontal_offset` (metres, measured from the wall centre).
-# back/front walls: + is towards the right.  left/right walls: + is towards the back (top of plan).
-OFFSET_RIGHT_POSITIVE = True
+# back/front walls and manholes: the app's front view puts + on the LEFT (so the plan and every
+# elevation, which all read these coordinates, match its 3D front view).
+# left/right walls: + is towards the back (top of plan).
+OFFSET_RIGHT_POSITIVE = False
 OFFSET_BACK_POSITIVE = True
 
 STACK_LABEL = {0.5: "HALF STACK", 1: "SINGLE STACK", 1.5: "1.5 STACK",
@@ -98,9 +100,10 @@ def _manhole_dims(kind: str, diameter) -> tuple:
 def _manhole(m: dict, length: float, width: float, idx: int) -> dict:
     kind = str(m.get("manhole_type") or "circular_600")
     shape, w_mm, h_mm = _manhole_dims(kind, m.get("diameter"))
+    off_mm = float(m.get("horizontal_offset") or 0) * 1000
     return {
         "id": m.get("id", ""),
-        "x": min(max(length / 2 + float(m.get("horizontal_offset") or 0) * 1000, 0), length),
+        "x": min(max(length / 2 + (off_mm if OFFSET_RIGHT_POSITIVE else -off_mm), 0), length),
         "y": min(max(width / 2 + float(m.get("top_depth_offset") or 0) * 1000, 0), width),
         "shape": shape,
         "w_mm": w_mm, "h_mm": h_mm,          # true footprint, used by the plan view

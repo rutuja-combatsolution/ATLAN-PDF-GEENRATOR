@@ -2,9 +2,8 @@
 # elevation_view.py
 # Elevation of the tank seen from one face (front / back / left / right).
 #
-# `annotate=True` adds the general-arrangement callouts and level dimensions
-# (used for the front elevation on the GA sheet); the plain form is used for
-# the extra back / left / right sheets.
+# Every view carries the general-arrangement callouts and level dimensions (front
+# elevation on the GA sheet, back / left / right on their own sheets).
 #
 # All model sizes are millimetres; `s` is points per millimetre and
 # (x0, y0) is the bottom-left of the cube stack in points.
@@ -32,6 +31,10 @@ WRAP_EXT_MM = 500          # geofab / liner extended above top of storage
 STUB = 20                  # pipe stub length, pt
 COL_PITCH = 20             # spacing of the left-hand dimension columns, pt
 
+ELEV_BASE = 46             # room under the tank: base RL label + title
+ELEV_ABOVE = 72            # room above top of storage: callouts, 500 extension
+ELEV_RIGHT_NEED = 52       # 500 dimension, right pipe stub + arrow
+
 
 def level_items(d):
     """IIL / OIL entries: first inlet and first outlet (merged when identical)."""
@@ -44,9 +47,9 @@ def level_items(d):
     return ([("IIL", first_in)] if first_in else []) + ([("OIL", first_out)] if first_out else [])
 
 
-def left_need(d):
-    """Space (pt) the annotated front elevation needs left of the tank."""
-    shift = 50 if any(p["side"] == "left" for p in d["pipes"]) else 0
+def left_need(d, side_l="left"):
+    """Space (pt) an annotated elevation needs left of the tank (side_l = wall at picture-left)."""
+    shift = 50 if any(p["side"] == side_l for p in d["pipes"]) else 0
     n = len(level_items(d))
     cols = 3 + n                                        # stack, cover, [IIL/OIL...], excavation depth
     need = 24 + COL_PITCH * (cols - 1) + 20
@@ -97,7 +100,8 @@ def _picture_pos(d, view, side_pos_mm, plan_axis):
     return full - side_pos_mm if MIRROR[view] else side_pos_mm
 
 
-def draw_elevation_view(c, d, x0, y0, s, view="front", annotate=False, title=True):
+def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=True):
+    """span_dim: add the overall width dimension under the tank (sheets that have no plan)."""
     from data_mapper import fmt_rl
 
     face, side_l, side_r = VIEWS[view]
@@ -192,21 +196,8 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", annotate=False, title=Tru
     c.setFillColor(colors.black)
     c.setLineWidth(1)
 
-    # ---- overall dimensions -------------------------------------------------------
-    if not annotate:
-        dim_h(c, x0, x1, y0 - 26, f"{span:.0f}", ext_to=y0 - 9)
-        dim_v(c, x0 - 34, y0, y_top, f"{d['stack_h']:.0f}", ext_to=x0)
-        c.setFont(FN, 7)
-        c.setFillColor(colors.black)
-        right_stub = 50 if any(p["side"] == side_r for p in d["pipes"]) else 0
-        c.drawString(x1 + 12 + right_stub, y_top, f"FSL {fmt_rl(d['fsl'])}")
-        c.drawString(x1 + 12 + right_stub, y0, f"BASE RL {fmt_rl(d['base_rl'])}")
-        if title:
-            underlined_title(c, f"{view.upper()} ELEVATION VIEW", x0 + tw / 2, y0 - 48, size=14)
-        return {"top": y_top, "fsl": y_fsl}
-
     # ======================================================
-    # GENERAL-ARRANGEMENT ANNOTATIONS (front elevation)
+    # GENERAL-ARRANGEMENT ANNOTATIONS
     # ======================================================
     SZ, LD = 7, 8.0
     from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -273,7 +264,7 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", annotate=False, title=Tru
     fw = stringWidth(fsl_txt, FN, 8)
     c.setFont(FN, 8)
     c.setFillColor(colors.black)
-    if ax + 22 + fw <= x1 + 18:
+    if ax + 22 + fw <= x1:                               # must not reach the liner callout's leader
         c.drawString(ax + 22, y_fsl + 12, fsl_txt)
         leader(c, ax + 20, y_fsl + 14.5, ax, y_fsl)
         keep.append((ax + 20, y_fsl + 9, ax + 24 + fw, y_fsl + 22))
@@ -362,8 +353,11 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", annotate=False, title=Tru
     xl, yb, w, m = place_block(geo_lines, x1 - 100 - max(stringWidth(t, FN, SZ) for t in geo_lines), False)
     draw_block(geo_lines, xl, yb, w, m, False)
 
+    if span_dim:
+        dim_h(c, x0, x1, y0 - 26, f"{span:.0f}", ext_to=y0 - 9)
     if title:
-        underlined_title(c, "FRONT ELEVATION VIEW", x0 + tw / 2, y0 - 34, size=11)
+        underlined_title(c, f"{view.upper()} ELEVATION VIEW", x0 + tw / 2,
+                         y0 - (48 if span_dim else 34), size=14 if span_dim else 11)
     return {"top": y_top, "fsl": y_fsl}
 
 
@@ -372,10 +366,17 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", annotate=False, title=Tru
 # ======================================================
 
 def draw_elevation_page(c, d, view, bx, by, bw, bh):
-    """Plain elevation centred in the box (bx, by, bw, bh), scaled to fill the sheet
-    (an end-on view of a long tank would be unreadable at the front-view scale)."""
+    """Annotated elevation, its annotations centred in the box (bx, by, bw, bh) and scaled to
+    fill the sheet (an end-on view of a long tank would be unreadable at the front-view scale)."""
     span = d["width"] if view in ("left", "right") else d["length"]
-    s = min((bw - 260) / span, (bh - 220) / (d["stack_h"] + d["cover"]), 0.10)
-    x0 = bx + (bw - span * s) / 2
-    y0 = by + (bh - d["stack_h"] * s) / 2
-    draw_elevation_view(c, d, x0, y0, s, view=view, annotate=False)
+    need_l = left_need(d, VIEWS[view][1])
+    base = ELEV_BASE + 20                               # + room for the span dimension and big title
+    pad = 40
+    s = min((bw - need_l - ELEV_RIGHT_NEED - pad) / span,
+            (bh - pad - base - ELEV_ABOVE) / d["stack_h"],
+            (bh - pad - base - 44) / (d["stack_h"] + d["cover"]),
+            0.10)
+    h = base + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
+    x0 = bx + (bw - (need_l + span * s + ELEV_RIGHT_NEED)) / 2 + need_l
+    y0 = by + (bh - h) / 2 + base
+    draw_elevation_view(c, d, x0, y0, s, view=view, span_dim=True)
