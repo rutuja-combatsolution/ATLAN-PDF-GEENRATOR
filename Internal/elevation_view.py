@@ -1,620 +1,381 @@
 # ==========================================================
 # elevation_view.py
+# Elevation of the tank seen from one face (front / back / left / right).
+#
+# `annotate=True` adds the general-arrangement callouts and level dimensions
+# (used for the front elevation on the GA sheet); the plain form is used for
+# the extra back / left / right sheets.
+#
+# All model sizes are millimetres; `s` is points per millimetre and
+# (x0, y0) is the bottom-left of the cube stack in points.
 # ==========================================================
 
 from reportlab.lib import colors
+from reportlab.pdfgen.canvas import FILL_EVEN_ODD
 from reportlab.lib.units import mm
 
-from Internal.plan_view import (
-    draw_dimension_horizontal,
-    draw_dimension_vertical,
-    draw_flow_arrow,
-)
- 
+from Internal import cube_art
+from Internal.plan_view import (FN, FB, arrowhead, dim_h, dim_v, draw_flow_arrow,
+                                leader, text_block, underlined_title, _seg_hits_box)
+
+# view -> (face we look at, side shown at picture-left, side shown at picture-right)
+# Plan orientation: front = bottom edge ("bottom"), back = top edge ("top").
+VIEWS = {
+    "front": ("bottom", "left",   "right"),
+    "back":  ("top",    "right",  "left"),
+    "left":  ("left",   "top",    "bottom"),
+    "right": ("right",  "bottom", "top"),
+}
+MIRROR = {"front": False, "back": True, "left": True, "right": False}
+
+WRAP_EXT_MM = 500          # geofab / liner extended above top of storage
+STUB = 20                  # pipe stub length, pt
+COL_PITCH = 20             # spacing of the left-hand dimension columns, pt
+
+
+def level_items(d):
+    """IIL / OIL entries: first inlet and first outlet (merged when identical)."""
+    first_in = next((p for p in d["pipes"] if p["kind"] == "INLET"), None)
+    first_out = next((p for p in d["pipes"] if p["kind"] == "OUTLET"), None)
+    depth = lambda p: (d["fsl"] - p["il"]) * 1000
+    if first_in and first_out and abs(depth(first_in) - depth(first_out)) < 1 and \
+            first_in["diameter"] == first_out["diameter"]:
+        return [("IIL/OIL", first_in)]
+    return ([("IIL", first_in)] if first_in else []) + ([("OIL", first_out)] if first_out else [])
+
+
+def left_need(d):
+    """Space (pt) the annotated front elevation needs left of the tank."""
+    shift = 50 if any(p["side"] == "left" for p in d["pipes"]) else 0
+    n = len(level_items(d))
+    cols = 3 + n                                        # stack, cover, [IIL/OIL...], excavation depth
+    need = 24 + COL_PITCH * (cols - 1) + 20
+    return shift + max(need, 130 if n else 0)
+
 # ======================================================
-# ATLANCUBE SIDE ELEVATION PANEL
+# ATLANCUBE SIDE FACE (vector artwork traced from CAD)
 # ======================================================
+
+FACE_FORM = "atlancube_face"
+
+
+def _define_face_form(c):
+    c.beginForm(FACE_FORM, -2, -2, cube_art.WIDTH + 2, cube_art.HEIGHT + 2)
+    c.setFillGray(0)
+    c.rect(-2, -2, cube_art.WIDTH + 4, cube_art.HEIGHT + 4, stroke=0, fill=1)
+    c.transform(1, 0, 0, -1, 0, cube_art.HEIGHT)                 # artwork is y-down
+    for rings, tone in zip(cube_art.TIERS, cube_art.TONES):
+        c.setFillGray(tone)
+        path = c.beginPath()
+        for ring in rings:
+            path.moveTo(ring[0], ring[1])
+            for i in range(2, len(ring), 2):
+                path.lineTo(ring[i], ring[i + 1])
+            path.close()
+        c.drawPath(path, stroke=0, fill=1, fillMode=FILL_EVEN_ODD)
+    c.endForm()
+
 
 def draw_side_panel(c, x, y, w, h):
-
+    if not c.hasForm(FACE_FORM):
+        _define_face_form(c)
     c.saveState()
-
-    mid_y = y + (h / 2)
-
-    # ---------------------------------
-    # OUTER PANEL
-    # ---------------------------------
-
-    # PANEL BORDER
-
-    c.setLineWidth(3)
-
-    c.rect(
-        x,
-        y,
-        w,
-        h,
-        stroke=1,
-        fill=0
-    )
-
-    
-    # ---------------------------------
-    # 3 CHAMBERS
-    # ---------------------------------
-
-    gap = w * 0.18
-
-    bay_w = (
-        w - (2 * gap)
-    ) / 3
-
-    bay1_x = x
-    bay2_x = x + bay_w + gap
-    bay3_x = x + (2 * bay_w) + (2 * gap)
-
-     
-
-    # ---------------------------------
-    # BOLD ZIG-ZAGS
-    # ---------------------------------
-
-    c.setLineWidth(8)
-
-    for bx in [
-        bay1_x,
-        bay2_x,
-        bay3_x
-    ]:
-
-        rib_offset = bay_w * 0.15
-        neck_width = bay_w * 0.12
-
-        left = bx + rib_offset
-        right = bx + bay_w - rib_offset
-
-        center_l = (
-            bx
-            + (bay_w / 2)
-            - neck_width
-        )
-
-        center_r = (
-            bx
-            + (bay_w / 2)
-            + neck_width
-        )
-
-        # upper zig-zag
-
-        c.line(
-            left,
-            y + h,
-            center_l,
-            mid_y
-        )
-
-        c.line(
-            right,
-            y + h,
-            center_r,
-            mid_y
-        )
-
-        # lower zig-zag
-
-        c.line(
-            left,
-            y,
-            center_l,
-            mid_y
-        )
-
-        c.line(
-            right,
-            y,
-            center_r,
-            mid_y
-        )
-
-    c.restoreState()
-def draw_elevation_view(
-    c,
-    data,
-    x=140,
-    y=150
-):
-
-    # ======================================================
-    # SCALE
-    # ======================================================
-
-    available_w = 220 * mm
-    available_h = 110 * mm
-
-    # ======================================================
-    # REAL TANK HEIGHT
-    # ======================================================
-
-    real_tank_height = data["height"]
-
-    # ======================================================
-    # SCALE
-    # ======================================================
-
-    scale_x = (
-        available_w
-        / data["length"]
-    )
-
-    # Use length-based scaling so height grows dynamically
-    scale = scale_x
-
-    tank_len = (
-        data["length"]
-        * scale
-    )
-
-    tank_ht = (
-        real_tank_height
-        * scale
-    )
-
-    # ======================================================
-    # PANEL GRID
-    # ======================================================
-
-    cols = data["length_panels"]
-    rows = data["levels"]
-
-    cell_w = tank_len / cols
-    cell_h = tank_ht / rows
-
-    # ======================================================
-    # TITLE
-    # ======================================================
-
-    title = "ELEVATION VIEW"
-
-    c.setFont(
-        "Helvetica-Bold",
-        20
-    )
-
-    text_width = c.stringWidth(
-        title,
-        "Helvetica-Bold",
-        20
-    )
-
-    # Center of tank
-    title_x = x + (tank_len / 2) - (text_width / 2)
-    title_y = y - 70
-
-    c.drawString(
-        title_x,
-        title_y,
-        title
-    )
-
-    # Underline
-
-    c.setLineWidth(1.5)
-
-    c.line(
-        title_x,
-        title_y - 3,
-        title_x + text_width,
-        title_y - 3
-    )
-
-    # ======================================================
-    # OUTER BORDER
-    # ======================================================
-
-    c.saveState()
-
-    c.setLineWidth(2)
-
-    c.rect(
-        x,
-        y,
-        tank_len,
-        tank_ht
-    )
-
+    c.translate(x, y)
+    c.scale(w / cube_art.WIDTH, h / cube_art.HEIGHT)
+    c.doForm(FACE_FORM)
     c.restoreState()
 
-    # ======================================================
-    # REDRAW PANELS ON TOP
-    # ======================================================
 
-    for col in range(cols):
+# ======================================================
+# ELEVATION VIEW
+# ======================================================
 
-        px = x + (col * cell_w)
+def _picture_pos(d, view, side_pos_mm, plan_axis):
+    """Position along the picture (mm from picture-left) of something at `side_pos_mm`
+    along the plan axis ('x' = length, 'y' = width)."""
+    full = d["length"] if plan_axis == "x" else d["width"]
+    return full - side_pos_mm if MIRROR[view] else side_pos_mm
 
-        for row in range(rows):
 
-            py = y + (row * cell_h)
+def draw_elevation_view(c, d, x0, y0, s, view="front", annotate=False, title=True):
+    from data_mapper import fmt_rl
 
-            draw_side_panel(
-                c,
-                px,
-                py,
-                cell_w,
-                cell_h
-            )
-    # ======================================================
-    # HEAVY GRID LINES
-    # ======================================================
+    face, side_l, side_r = VIEWS[view]
+    end_on = view in ("left", "right")
+    span = d["width"] if end_on else d["length"]
+    cols = d["cubes_wide"] if end_on else d["cubes_long"]
+
+    tw = span * s
+    th = d["stack_h"] * s
+    cell_w = tw / cols
+    x1 = x0 + tw
+    y_top = y0 + th                                         # top of storage
+    y_fsl = y_top + d["cover"] * s
+    ext = max(WRAP_EXT_MM * s, 8)
+
+    # ---- cube faces, layer by layer (the top layer may be a half layer) ---------
+    y = y0
+    for row_mm in d["rows_mm"]:
+        rh = row_mm * s
+        for col in range(cols):
+            draw_side_panel(c, x0 + col * cell_w, y, cell_w, rh)
+        y += rh
 
     c.setStrokeColor(colors.black)
-    c.setLineWidth(8)   # increase to 8 if needed
+    c.setLineWidth(1.5)
+    c.rect(x0, y0, tw, th, stroke=1, fill=0)
 
-    # Vertical lines
-    for col in range(1, cols):
-        gx = x + (col * cell_w)
-
-        c.line(
-            gx,
-            y,
-            gx,
-            y + tank_ht
-        )
-
-    # Horizontal lines
-    for row in range(1, rows):
-        gy = y + (row * cell_h)
-
-        c.line(
-            x,
-            gy,
-            x + tank_len,
-            gy
-        )
-    # ======================================================
-    # GEOFAB WRAP BORDER
-    # ======================================================
-
-    INNER_BLUE = 1      # almost on tank wall
-    PINK = 7           # small gap
-    OUTER_BLUE = 14      # small gap again
-
-    TOP_EXT_PINK = 20
-    TOP_EXT_BLUE = 25
-
-    # ------------------------------------------
-    # INNER BLUE BORDER (FULL TANK)
-    # ------------------------------------------
-
+    # ---- geofab wrap: inner blue dash, pink line, outer blue dash -----------------
     c.setStrokeColor(colors.blue)
-    c.setLineWidth(3)
-    c.setDash(30, 4)
+    c.setLineWidth(1.6)
+    c.setDash(14, 3)
+    c.rect(x0 - 1, y0 - 1, tw + 2, th + 2, stroke=1, fill=0)
+    c.setDash()
 
-    c.rect(
-        x - INNER_BLUE,
-        y - INNER_BLUE,
-        tank_len + (INNER_BLUE * 2),
-        tank_ht + (INNER_BLUE * 2),
-        stroke=1,
-        fill=0
-    )
-    c.setDash() 
-    # ------------------------------------------
-    # PINK BORDER
-    # LEFT + BOTTOM + RIGHT ONLY
-    # ------------------------------------------
-
+    pl, pr, pb, pt = x0 - 5, x1 + 5, y0 - 5, y_top + ext
     c.setStrokeColorRGB(1, 0, 1)
-
-    pink_left = x - PINK
-    pink_right = x + tank_len + PINK
-    pink_bottom = y - PINK
-    pink_top = y + tank_ht + TOP_EXT_PINK
-
-    c.line(
-        pink_left,
-        pink_bottom,
-        pink_left,
-        pink_top
-    )
-
-    c.line(
-        pink_left,
-        pink_bottom,
-        pink_right,
-        pink_bottom
-    )
-
-    c.line(
-        pink_right,
-        pink_bottom,
-        pink_right,
-        pink_top
-    )
-
-    # ------------------------------------------
-    # OUTER BLUE BORDER
-    # LEFT + BOTTOM + RIGHT ONLY
-    # ------------------------------------------
+    c.setLineWidth(1.2)
+    c.line(pl, pb, pl, pt)
+    c.line(pl, pb, pr, pb)
+    c.line(pr, pb, pr, pt)
 
     c.setStrokeColor(colors.blue)
-    c.setDash(30, 4)
-
-    blue_left = x - OUTER_BLUE
-    blue_right = x + tank_len + OUTER_BLUE
-    blue_bottom = y - OUTER_BLUE
-    blue_top = y + tank_ht + TOP_EXT_BLUE
-
-    c.line(
-        blue_left,
-        blue_bottom,
-        blue_left,
-        blue_top
-    )
-
-    c.line(
-        blue_left,
-        blue_bottom,
-        blue_right,
-        blue_bottom
-    )
-
-    c.line(
-        blue_right,
-        blue_bottom,
-        blue_right,
-        blue_top
-    )
-
+    c.setLineWidth(1.4)
+    c.setDash(14, 3)
+    bl, br, bb, bt = x0 - 9, x1 + 9, y0 - 9, y_top + ext + 4
+    c.line(bl, bb, bl, bt)
+    c.line(bl, bb, br, bb)
+    c.line(br, bb, br, bt)
     c.setDash()
     c.setStrokeColor(colors.black)
     c.setLineWidth(1)
-    # ======================================================
-    # MANHOLES
-    # ======================================================
-    
-    for mh in data.get("manholes", []):
 
-        panel_x = mh.get(
-            "panel_x",
-            cols // 2
-        )
+    # ---- manhole risers (on top of the tank, up to FSL) ------------------------
+    risers = []
+    riser_boxes = []                                   # keep-out rectangles for the callouts
+    for mh in d["manholes"]:
+        pos = _picture_pos(d, view, mh["y"] if end_on else mh["x"], "y" if end_on else "x")
+        mx = x0 + pos * s
+        rw = max(mh["size"] * s, 5)
+        rh = max(y_fsl - y_top, 6)
+        c.setFillGray(0.72)
+        c.setLineWidth(0.8)
+        c.rect(mx - rw / 2, y_top, rw, rh, stroke=1, fill=1)
+        c.setFillGray(0.45)
+        c.rect(mx - rw / 2 - 1.2, y_top + rh - 2.4, rw + 2.4, 2.4, stroke=1, fill=1)
+        risers.append(mx)
+        riser_boxes.append((mx - rw / 2 - 2, y_top, mx + rw / 2 + 2, y_top + rh + 3))
 
-        mx = (
-            x
-            + (panel_x * cell_w)
-            + (cell_w / 2)
-        )
-
-        riser_w = 12
-        riser_h = 35
-
-        # Riser
-        c.setFillColorRGB(0.60, 0.60, 0.60)
-        c.rect(
-            mx - (riser_w / 2),
-            y + tank_ht,
-            riser_w,
-            riser_h,
-            stroke=1,
-            fill=1
-        )
-
-        # Lid 
-        c.setLineWidth(2)
-        c.setFillColorRGB(0.60, 0.60, 0.60)
-        c.rect(
-            mx - 9,
-            y + tank_ht + riser_h,
-            18,
-            3,
-            stroke=1,
-            fill=1
-        )
-
+    # ---- pipes ---------------------------------------------------------------
+    for p in d["pipes"]:
+        pside = p["side"]
+        pipe_dia = max(p["diameter"] * s, 3.5)
+        py = y0 + p["z"] * s
+        c.setFillGray(0.75)
+        c.setStrokeColor(colors.black)
         c.setLineWidth(1)
 
-        '''c.drawCentredString(
-            mx,
-            y + tank_ht + riser_h + 10,
-            mh["id"]
-        )'''
+        if pside == face:
+            axis = "y" if end_on else "x"
+            cx = x0 + _picture_pos(d, view, p["along"], axis) * s
+            c.setStrokeColor(colors.red if p["kind"] == "INLET" else colors.blue)
+            c.circle(cx, py, pipe_dia / 2 + 0.6, stroke=1, fill=1)
+        elif pside == side_l:
+            c.rect(x0 - STUB, py - pipe_dia / 2, STUB, pipe_dia, stroke=1, fill=1)
+            draw_flow_arrow(c, x0, py, "WEST", p["kind"], pipe_extension=STUB)
+        elif pside == side_r:
+            c.rect(x1, py - pipe_dia / 2, STUB, pipe_dia, stroke=1, fill=1)
+            draw_flow_arrow(c, x1, py, "EAST", p["kind"], pipe_extension=STUB)
+        # opposite face is hidden
 
-    
-    # ======================================================
-    # PIPES
-    # ======================================================
+    c.setStrokeColor(colors.black)
+    c.setFillColor(colors.black)
+    c.setLineWidth(1)
 
-    PIPE_EXTENSION = 30
-
-    for pipe in data.get("pipes", []):
-
-        side = pipe["side"].lower()
-
-        # Elevation only shows LEFT and RIGHT wall pipes
-        if side not in ["left", "right"]:
-            continue
-
-        layer = pipe.get("level", 0)
-
-        pipe_y = (
-            y
-            + (layer * cell_h)
-            + (cell_h / 2)
-        )
-
-        pipe_w = max(
-            10,
-            pipe.get("diameter", 375) / 35
-        )
-
-        c.setFillColorRGB(
-            0.75,
-            0.75,
-            0.75
-        )
-
-        c.setStrokeColor(colors.black)
-        c.setLineWidth(1.5)
-
-        # ==========================================
-        # LEFT SIDE PIPE
-        # ==========================================
-
-        if side == "left":
-
-            pipe_x = x - PIPE_EXTENSION
-
-            c.rect(
-                pipe_x,
-                pipe_y - (pipe_w / 2),
-                PIPE_EXTENSION,
-                pipe_w,
-                stroke=1,
-                fill=1
-            )
-
-            # centerline
-
-            c.setStrokeColorRGB(
-                0.60,
-                0.60,
-                0.60
-            )
-
-            c.setDash(3, 2)
-
-            c.line(
-                pipe_x,
-                pipe_y,
-                x,
-                pipe_y
-            )
-
-            c.setDash()
-            c.setStrokeColor(colors.black)
-
-            # flow arrow
-
-            draw_flow_arrow(
-                c,
-                x,
-                pipe_y,
-                "WEST",
-                pipe.get("type", "INLET"),
-                pipe_extension=22
-            )
-
-            label_x = pipe_x - 55
-            label_y = pipe_y + 10
-
-        # ==========================================
-        # RIGHT SIDE PIPE
-        # ==========================================
-
-        else:
-
-            pipe_x = x + tank_len
-
-            c.rect(
-                pipe_x,
-                pipe_y - (pipe_w / 2),
-                PIPE_EXTENSION,
-                pipe_w,
-                stroke=1,
-                fill=1
-            )
-
-            # centerline
-
-            c.setStrokeColorRGB(
-                0.60,
-                0.60,
-                0.60
-            )
-
-            c.setDash(3, 2)
-
-            c.line(
-                pipe_x,
-                pipe_y,
-                pipe_x + PIPE_EXTENSION,
-                pipe_y
-            )
-
-            c.setDash()
-            c.setStrokeColor(colors.black)
-
-            draw_flow_arrow(
-                c,
-                pipe_x,
-                pipe_y,
-                "EAST",
-                pipe.get("type", "OUTLET"),
-                pipe_extension=PIPE_EXTENSION
-            )
-
-            label_x = pipe_x + PIPE_EXTENSION + 10
-            label_y = pipe_y + 10
-
-        # ==========================================
-        # LABEL
-        # ==========================================
-
-        c.setFont("Helvetica", 6)
-
-        c.drawString(
-            label_x,
-            label_y,
-            f"{pipe['id']} Ø{pipe['diameter']}"
-        )
-
+    # ---- overall dimensions -------------------------------------------------------
+    if not annotate:
+        dim_h(c, x0, x1, y0 - 26, f"{span:.0f}", ext_to=y0 - 9)
+        dim_v(c, x0 - 34, y0, y_top, f"{d['stack_h']:.0f}", ext_to=x0)
+        c.setFont(FN, 7)
         c.setFillColor(colors.black)
-        c.setStrokeColor(colors.black)
-        c.setLineWidth(1)
-    
-    # ======================================================
-    # OVERALL LENGTH DIMENSION
-    # ======================================================
-
-    draw_dimension_horizontal(
-        c,
-        x,
-        x + tank_len,
-        y - 40,
-        f"{data['length']:.0f}"
-    )
+        right_stub = 50 if any(p["side"] == side_r for p in d["pipes"]) else 0
+        c.drawString(x1 + 12 + right_stub, y_top, f"FSL {fmt_rl(d['fsl'])}")
+        c.drawString(x1 + 12 + right_stub, y0, f"BASE RL {fmt_rl(d['base_rl'])}")
+        if title:
+            underlined_title(c, f"{view.upper()} ELEVATION VIEW", x0 + tw / 2, y0 - 48, size=14)
+        return {"top": y_top, "fsl": y_fsl}
 
     # ======================================================
-    # OVERALL HEIGHT DIMENSION
+    # GENERAL-ARRANGEMENT ANNOTATIONS (front elevation)
     # ======================================================
+    SZ, LD = 7, 8.0
+    from reportlab.pdfbase.pdfmetrics import stringWidth
 
-    draw_dimension_vertical(
-        c,
-        y,
-        y + tank_ht,
-        x - 50,
-        f"{real_tank_height:.0f}"
-    )
+    # dimension columns sit left of the tank (and of any pipe stub + arrow on that side)
+    shift = 50 if any(p["side"] == side_l for p in d["pipes"]) else 0
+    col = x0 - shift - 24
 
-    # ======================================================
-    # LEVEL TEXT
-    # ======================================================
+    def column(y_a, y_b, value, label):
+        nonlocal col
+        dim_v(c, col, y_a, y_b, value, label, ext_to=x0 - 9)
+        col -= COL_PITCH
 
-    c.setFont(
-        "Helvetica",
-        7
-    )
+    column(y0, y_top, f"{d['stack_h']:.0f}", f"{d['stack_label']} (1000L)")
+    column(y_top, y_fsl, f"{d['cover']:.0f}", "COVER")
 
-    c.drawString(
-        x + tank_len + 40,
-        y + tank_ht,
-        f"FSL {data['fsl']:.2f}"
-    )
+    items = level_items(d)
+    depth = lambda p: (d["fsl"] - p["il"]) * 1000
+    notes = []
+    for tag, p in items:
+        lowest = y0 + (p["il"] - d["base_rl"]) * 1000 * s
+        column(lowest, y_fsl, f"{depth(p):.0f}", tag)
+        notes.append(f"{tag}: Ø{p['diameter']:g} PIPE  IL {fmt_rl(p['il'])}")
+    if notes:
+        text_block(c, x0 - shift - 24 + 4, y_fsl + 22 + 7 * len(notes), notes + ["BY OTHERS"],
+                   size=6.5, align="r", leading=7.5)
 
-    c.drawString(
-        x + tank_len + 40,
-        y,
-        f"BASE RL {data['base_rl']:.2f}"
-    )
+    column(y0, y_fsl, f"{d['exc_depth']:.0f}", "EXCAVATION DEPTH")
+
+    # ---- callouts above the tank --------------------------------------------------
+    # Every block is placed on a spot that touches no riser, no line and no other block;
+    # blocks that have no clear spot (very small tanks) get a white mask as last resort.
+    keep = list(riser_boxes)
+    keep.append((x1 + 24, y_top - 2, x1 + 40, y_top + ext + 2))       # the "500" dimension
+    for p in d["pipes"]:                                              # side stubs + their arrows
+        py_ = y0 + p["z"] * s
+        half_ = max(p["diameter"] * s, 3.5) / 2 + 6
+        if p["side"] == side_l:
+            keep.append((x0 - STUB - 28, py_ - half_, x0, py_ + half_))
+        elif p["side"] == side_r:
+            keep.append((x1, py_ - half_, x1 + STUB + 28, py_ + half_))
+
+    def clear(box):
+        return all(box[2] < o[0] or box[0] > o[2] or box[3] < o[1] or box[1] > o[3] for o in keep)
+
+    def block_box(xl, yb, w, n, size=SZ, lead=LD):
+        return (xl - 1, yb - (n - 1) * lead - 2, xl + w + 1, yb + size + 1)
+
+    def free_anchor(xa):
+        """Point on the top edge for a leader, moved off any riser."""
+        for bx0, _, bx1, _ in riser_boxes:
+            if bx0 <= xa <= bx1:
+                xa = bx0 - 2 if xa - bx0 < bx1 - xa else bx1 + 2
+        return min(max(xa, x0 + 2), x1 - 2)
+
+    # FSL label: right of the leftmost riser (or of a ground tick); left of it near the right end
+    if risers:
+        ax = min(risers)
+    else:
+        ax = x0 + 8
+        c.setLineWidth(0.6)
+        c.line(x0 - 4, y_fsl, x0 + 16, y_fsl)
+    fsl_txt = f"FSL {fmt_rl(d['fsl'])}"
+    fw = stringWidth(fsl_txt, FN, 8)
+    c.setFont(FN, 8)
+    c.setFillColor(colors.black)
+    if ax + 22 + fw <= x1 + 18:
+        c.drawString(ax + 22, y_fsl + 12, fsl_txt)
+        leader(c, ax + 20, y_fsl + 14.5, ax, y_fsl)
+        keep.append((ax + 20, y_fsl + 9, ax + 24 + fw, y_fsl + 22))
+    else:
+        c.drawRightString(ax - 22, y_fsl + 12, fsl_txt)
+        leader(c, ax - 20, y_fsl + 14.5, ax, y_fsl)
+        keep.append((ax - 24 - fw, y_fsl + 9, ax - 20, y_fsl + 22))
+
+    # base RL
+    text_block(c, x0 - 34, y0 - 20, ["ATLAN CUBE", f"BASE RL: {fmt_rl(d['base_rl'])}"],
+               size=7, align="r", leading=8)
+    leader(c, x0 - 32, y0 - 17.6, x0 + 3, y0 - 1)
+
+    # liner callout at the right end (fixed spot, raised until it is clear)
+    liner = ["NON-WOVEN", "GEO-FAB & LDPE LINER", "EXTENDED 500mm", "ABOVE TOP OF STORAGE"]
+    lw = max(stringWidth(t, FN, SZ) for t in liner)
+    ly = y_top + ext + 54
+    for _ in range(30):
+        if clear(block_box(x1 + 6 - lw, ly, lw, len(liner))):
+            break
+        ly += 6
+    keep.append(block_box(x1 + 6 - lw, ly, lw, len(liner)))
+    text_block(c, x1 + 6, ly, liner, size=SZ, align="r", leading=LD)
+    leader(c, x1 + 9, ly - (len(liner) - 1) * LD - 1.5, x1 + 5, y_top + ext)   # from under the last line
+    dim_v(c, x1 + 26, y_top, y_top + ext, "500", ext_to=x1 + 9)
+
+    keep_leaders = []                                  # leader segments already drawn
+
+    def leader_segs(xl, yb, w, from_left):
+        """The two segments of the leader of a block (landing + diagonal to the top edge)."""
+        ax_ = free_anchor(xl - 14 if from_left else xl + w + 28)
+        if from_left and ax_ > xl + w:            # block sits left of the tank: leave by its right end
+            from_left = False
+        elif not from_left and ax_ < xl:          # block sits beyond the tank's end: leave by its left end
+            from_left = True
+        lx = xl - 2 if from_left else xl + w + 2
+        ly_ = yb + SZ - 4.6
+        land = 5 if ax_ >= lx else -5
+        return [((lx, ly_), (lx + land, ly_)), ((lx + land, ly_), (ax_, y_top + 1))]
+
+    def place_block(lines, pref_x, from_left):
+        """Left-aligned block above the tank at the nearest spot to pref_x where neither the
+        block nor its leader touches a riser, another block or another leader."""
+        w = max(stringWidth(t, FN, SZ) for t in lines)
+        n = len(lines)
+        levels = [y_top + 28 + k * (n * LD + 6) for k in range(4)]
+        xs_ = [pref_x]
+        for k in range(1, 80):
+            xs_ += [pref_x + 8 * k, pref_x - 8 * k]
+        # normally above the tank; a tank narrower than its callouts lets them sit past its end
+        lo, hi = x0 - 4, max(x1 + 6 - w, x1 + 150 - w)
+        for yb in levels:
+            for xl in xs_:
+                if not (lo <= xl <= hi):
+                    continue
+                box = block_box(xl, yb, w, n)
+                if not clear(box):
+                    continue
+                segs = leader_segs(xl, yb, w, from_left)
+                if any(_seg_hits_box(a, b, o) for a, b in segs for o in keep):
+                    continue
+                if any(_seg_hits_box(a, b, box) for a, b in keep_leaders):
+                    continue
+                keep.append(box)
+                keep_leaders.extend(segs)
+                return xl, yb, w, False
+        xl, yb = min(max(pref_x, lo), max(lo, hi)), levels[0]
+        keep.append(block_box(xl, yb, w, n))
+        keep_leaders.extend(leader_segs(xl, yb, w, from_left))
+        return xl, yb, w, True
+
+    def draw_block(lines, xl, yb, w, masked, from_left):
+        if masked:
+            bx = block_box(xl, yb, w, len(lines))
+            c.setFillColor(colors.white)
+            c.rect(bx[0], bx[1], bx[2] - bx[0], bx[3] - bx[1], stroke=0, fill=1)
+        text_block(c, xl, yb, lines, size=SZ, align="l", leading=LD)
+        (a, b), (_, end) = leader_segs(xl, yb, w, from_left)
+        leader(c, a[0], a[1], end[0], end[1])
+
+    top_lines = ["TOP OF STORAGE", f"RL {fmt_rl(d['top_rl'])}"]
+    xl, yb, w, m = place_block(top_lines, x0 + tw * 0.30, True)
+    draw_block(top_lines, xl, yb, w, m, True)
+
+    geo_lines = ["NON-WOVEN GEO-FAB", "WRAPPED AROUND THE TANK"]
+    xl, yb, w, m = place_block(geo_lines, x1 - 100 - max(stringWidth(t, FN, SZ) for t in geo_lines), False)
+    draw_block(geo_lines, xl, yb, w, m, False)
+
+    if title:
+        underlined_title(c, "FRONT ELEVATION VIEW", x0 + tw / 2, y0 - 34, size=11)
+    return {"top": y_top, "fsl": y_fsl}
+
+
+# ======================================================
+# ONE ELEVATION PER SHEET (back / left / right extra sheets)
+# ======================================================
+
+def draw_elevation_page(c, d, view, bx, by, bw, bh):
+    """Plain elevation centred in the box (bx, by, bw, bh), scaled to fill the sheet
+    (an end-on view of a long tank would be unreadable at the front-view scale)."""
+    span = d["width"] if view in ("left", "right") else d["length"]
+    s = min((bw - 260) / span, (bh - 220) / (d["stack_h"] + d["cover"]), 0.10)
+    x0 = bx + (bw - span * s) / 2
+    y0 = by + (bh - d["stack_h"] * s) / 2
+    draw_elevation_view(c, d, x0, y0, s, view=view, annotate=False)

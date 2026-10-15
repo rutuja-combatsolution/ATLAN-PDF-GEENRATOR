@@ -1,242 +1,219 @@
 # data_mapper.py
-# Takes raw JSON (from API or file) and returns a clean drawing_data dict.
-# No PDF logic here — pure data mapping.
+# Turns the app payload (geometry / input / material) into the drawing_data dict
+# every page and view reads. No PDF logic here - pure data mapping.
 #
-# FIXED fields (never in JSON):
-#   drawn_by  -> always "R.R."
-#   size      -> always "A3"
-#   scale     -> always "N.T.S"
-#   rev       -> derived from rev_history[0][0]
-#   page2_image -> fixed to isometric.jpeg
-#   page3_image -> auto-generated from stack_key (withdimension folder)
+# INPUT  payload = {"geometry": {...}, "input": {...}, "material": {...},
+#                   "project":  {...}}        <- "project" is optional (title block)
 #
-# DYNAMIC fields (come from JSON):
-#   customer_code, dwg_no, request_no, drawn_date
-#   project_lines
-#   stack_key, wide, long, storage_m3
-#   rev_history     (list of rows — drives rev number automatically)
-#   parts_list      (full rows, varies per stack)
+# Optional "project" keys: project_name | project_lines, dwg_no, customer_code,
+# request_no, drawn_date, client_name, rev_history.
+# Missing header values stay blank (drawn_date / rev default to today / "1").
+#
+# FIXED (not in any payload): drawn_by "R.R.", scale "N.T.S", size "A3",
+# cube footprint 1150 mm, layer height 780 mm, excavation margin 525 mm per side.
 
-
+import math
 import os
-
-
-# =============================================================================
-# STACK LABEL LOOKUP
-# =============================================================================
+import re
+from datetime import date
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE3_IMAGES_DIR = os.path.join(_HERE, "withdimension", "withdimension")
 
-STACK_META = {
-    "0.5": {"label": "HALF STACK"},
-    "1":   {"label": "SINGLE STACK"},
-    "1.5": {"label": "1.5 STACK"},
-    "2":   {"label": "DOUBLE STACK"},
-    "2.5": {"label": "2.5 STACK"},
-    "3":   {"label": "TRIPLE STACK"},
-}
+CUBE_MM = 1150            # plan footprint of one 1000L module
+LAYER_MM = 780            # height of one full layer
+EXC_MARGIN_MM = 525       # 500 clearance + 25 wrap, each side (ref: 31050 -> 32100)
+
+# Sign convention of `horizontal_offset` (metres, measured from the wall centre).
+# back/front walls: + is towards the right.  left/right walls: + is towards the back (top of plan).
+OFFSET_RIGHT_POSITIVE = True
+OFFSET_BACK_POSITIVE = True
+
+STACK_LABEL = {0.5: "HALF STACK", 1: "SINGLE STACK", 1.5: "1.5 STACK",
+               2: "DOUBLE STACK", 2.5: "2.5 STACK", 3: "TRIPLE STACK"}
+
+# payload wall name -> side used by the plan view (top = back row, bottom = front row)
+_PLAN_SIDE = {"back": "top", "top": "top", "front": "bottom", "bottom": "bottom",
+              "left": "left", "right": "right"}
 
 
-# =============================================================================
-# PIPE / MANHOLE BUILDERS
-# =============================================================================
-
-def _build_pipes(raw_list: list, pipe_type: str) -> list:
-    pipes = []
-    for idx, p in enumerate(raw_list):
-        pipes.append({
-            "id":                p.get("id",    f"{pipe_type}-{idx+1}"),
-            "label":             f"{pipe_type}-{idx+1}",
-            "type":              pipe_type,
-            "side":              p.get("side",   "left" if pipe_type == "INLET" else "right"),
-            "panel_x":           p.get("panel_x", 0),
-            "panel_y":           p.get("panel_y", 0),
-            "diameter":          p.get("diameter", 375),
-            "horizontal_offset": p.get("horizontal_offset", 0.0),
-            "invert_level":      p.get("invert_level", 0.0),
-        })
-    return pipes
+def fmt_rl(v: float) -> str:
+    """12.2 -> '12.20', 11.315 -> '11.315', 100 -> '100.00' (>= 2 decimals, <= 3)."""
+    s = f"{v:.3f}".rstrip("0")
+    whole, _, frac = s.partition(".")
+    return f"{whole}.{frac.ljust(2, '0')}"
 
 
-def _build_manholes(raw_list: list) -> list:
-    manholes = []
-    for idx, m in enumerate(raw_list):
-        manholes.append({
-            "id":                m.get("id",    f"MH-{idx+1}"),
-            "label":             f"MH-{idx+1}",
-            "side":              m.get("side",   "top"),
-            "panel_x":           m.get("panel_x", 0),
-            "panel_y":           m.get("panel_y", 0),
-            "horizontal_offset": m.get("horizontal_offset", 0.0),
-            "invert_level":      m.get("invert_level", 0.0),
-        })
-    return manholes
+def fmt_num(v) -> str:
+    return f"{v:g}" if isinstance(v, (int, float)) else str(v)
 
 
-# =============================================================================
-# MAIN MAPPER
-# =============================================================================
+def _today() -> str:
+    d = date.today()
+    return f"{d.day}/{d.month:02d}/{d.year}"
 
-def build(raw: dict) -> dict:
-    """
-    Map raw API/JSON dict -> clean drawing_data dict.
 
-    Expected raw keys:
-        customer_code   str
-        dwg_no          str
-        request_no      str
-        drawn_date      str           e.g. "2/04/2026"
-        project_lines   list[str]     1 or 2 lines
-        stack_key       str           "0.5" | "1" | "1.5" | "2" | "2.5" | "3"
-        wide            int
-        long            int
-        storage_m3      float
-        rev_history     list of [rev, date, by, description]
-        parts_list      list of [item, description, qty, remarks]
-        page2_image     str           path to isometric image
+def _pipe(p: dict, kind: str, length: float, width: float, base_rl: float) -> dict:
+    default_side = "left" if kind == "INLET" else "right"
+    side = _PLAN_SIDE.get(str(p.get("side") or default_side).lower(), default_side)
+    off_mm = float(p.get("horizontal_offset") or 0.0) * 1000
+    dia = float(p.get("diameter") or 0.0)
+    il = float(p.get("invert_level") if p.get("invert_level") is not None else base_rl)
 
-    Auto-generated fields:
-        page3_image     str           auto-selected from withdimension folder based on stack_key
-    """
-
-    stack_key   = str(raw["stack_key"])
-    stack_label = STACK_META[stack_key]["label"]
-
-    # rev is always the top row of rev_history — never stored separately
-    rev_history = raw["rev_history"]
-    rev         = str(rev_history[0][0])
-
-    wide    = raw["wide"]
-    long    = raw["long"]
-    storage = raw["storage_m3"]
-
-    # ==========================================================
-    # PLAN VIEW / ELEVATION VIEW MAPPING
-    # ==========================================================
-
-    STACK_CONFIG = {
-        "0.5": {
-            "layers": 1,
-            "stack_name": "half",
-            "stack_length": 390
-        },
-        "1": {
-            "layers": 1,
-            "stack_name": "single",
-            "stack_length": 780
-        },
-        "1.5": {
-            "layers": 2,
-            "stack_name": "one_half",
-            "stack_length": 1170
-        },
-        "2": {
-            "layers": 2,
-            "stack_name": "double",
-            "stack_length": 1560
-        },
-        "2.5": {
-            "layers": 3,
-            "stack_name": "two_half",
-            "stack_length": 1950
-        },
-        "3": {
-            "layers": 3,
-            "stack_name": "triple",
-            "stack_length": 2340
-        }
-    }
-
-    cfg = STACK_CONFIG[stack_key]
-
-    length_mm = long * 1150
-    breadth_mm = wide * 1150
-
-    title_lines = [
-        "ATLAN CUBE",
-        f"ATLAN CUBE 1000L MODULE ({stack_label})",
-        f"{wide}-CUBES WIDE x {long}-CUBES LONG - {storage}m3",
-        "GENERAL ARRANGEMENT",
-    ]
-
-    # Auto-generate page3_image path based on stack_key (page 2 uses fixed isometric.jpeg)
-    page2_image_path = os.path.join(_HERE, "isometric.jpeg")
-    
-    page3_image_filename = f"{stack_key}stack.png"
-    page3_image_path = os.path.join(PAGE3_IMAGES_DIR, page3_image_filename)
+    if side in ("top", "bottom"):
+        along = length / 2 + (off_mm if OFFSET_RIGHT_POSITIVE else -off_mm)
+        wall = length
+    else:
+        along = width / 2 + (off_mm if OFFSET_BACK_POSITIVE else -off_mm)
+        wall = width
+    if not 0.0 <= along <= wall:
+        import warnings
+        warnings.warn(f"{kind} {p.get('id', '')[:8]} on the {side} wall: horizontal_offset "
+                      f"{off_mm / 1000:g} m is outside the {wall / 1000:g} m wall - drawn at the edge")
+        along = min(max(along, 0.0), wall)
+    cell = along / CUBE_MM - 0.5            # fractional cube index whose centre is `along`
 
     return {
-    "customer_code": raw.get("customer_code", ""),
-    "dwg_no":        raw.get("dwg_no", ""),
-    "request_no":    raw.get("request_no", ""),
-    "drawn_date":    raw.get("drawn_date", ""),
-
-    "drawn_by":      "R.R.",
-    "scale":         "N.T.S",
-    "size":          "A3",
-
-    "rev":           rev,
-    "rev_history":   rev_history,
-
-    "project_lines": raw.get("project_lines", [""]),
-    "title_lines":   title_lines,
-
-    "stack_key":     stack_key,
-    "stack_label":   stack_label,
-
-    "wide":          wide,
-    "long":          long,
-
-    "storage_m3":    storage,
-
-    "parts_list":    raw.get("parts_list", []),
-
-    "page2_image":   page2_image_path,
-    "page3_image":   page3_image_path,
+        "id": p.get("id", ""), "kind": kind, "side": side, "along": along,
+        "panel_x": {"left": 0, "right": length / CUBE_MM - 1}.get(side, cell),
+        "panel_y": {"bottom": 0, "top": width / CUBE_MM - 1}.get(side, cell),
+        "diameter": dia, "il": il,
+        "z": (il - base_rl) * 1000 + dia / 2,     # pipe centre above tank base, mm
+    }
 
 
+def _manhole_dims(kind: str, diameter) -> tuple:
+    """(shape, width_mm, height_mm) from the app's type name, e.g. 'square_600x600',
+    'circular_300', 'circular_600'; falls back to `diameter` (mm), then to a 600 circle."""
+    s = re.fullmatch(r"square_(\d+)x(\d+)", kind)
+    if s:
+        return "square", float(s.group(1)), float(s.group(2))
+    c = re.fullmatch(r"circular_(\d+)", kind)
+    if c:
+        return "circle", float(c.group(1)), float(c.group(1))
+    dia = float(diameter or 600)
+    return ("square" if kind.startswith("square") else "circle"), dia, dia
 
-    # =====================================================
-    # PLAN VIEW / ELEVATION VIEW
-    # =====================================================
 
-    "length": length_mm,
-    "width": breadth_mm,
+def _manhole(m: dict, length: float, width: float, idx: int) -> dict:
+    kind = str(m.get("manhole_type") or "circular_600")
+    shape, w_mm, h_mm = _manhole_dims(kind, m.get("diameter"))
+    return {
+        "id": m.get("id", ""),
+        "x": min(max(length / 2 + float(m.get("horizontal_offset") or 0) * 1000, 0), length),
+        "y": min(max(width / 2 + float(m.get("top_depth_offset") or 0) * 1000, 0), width),
+        "shape": shape,
+        "w_mm": w_mm, "h_mm": h_mm,          # true footprint, used by the plan view
+        "size": 600,                         # riser width used by the elevations (unchanged)
+    }
 
-    "length_panels": long,
-    "width_panels": wide,
 
-    "panel_length": 1150,
-    "panel_width": 1150,
+def _parts_list(m: dict) -> list:
+    rows = [("1000L MODULE - HALF CUBE", m.get("no_half_cubes")),
+            ("1000L MODULE - SIDE PANEL FULL HEIGHT", m.get("no_side_plates")),
+            ("1000L MODULE - SIDE PANEL HALF HEIGHT", m.get("no_half_side_plates")),
+            ("SINGLE CONNECTOR", m.get("no_single_clips")),
+            ("DOUBLE CONNECTOR", m.get("no_double_clips"))]
+    rows = [(d, q) for d, q in rows if q]
+    return [[str(i + 1), d, fmt_num(q), ""] for i, (d, q) in enumerate(rows)]
 
-    "levels": cfg["layers"],
-    "height": cfg["stack_length"],
 
-    "stack_number": cfg["stack_name"],
-    "stack_length": cfg["stack_length"],
+def _components(m: dict) -> list:
+    rows = [("Atlan Cubes", "Material", m.get("no_half_cubes"), "Each"),
+            ("Side Plates", "Material", m.get("no_side_plates"), "Each"),
+            ("Half Side Plates", "Material", m.get("no_half_side_plates"), "Each"),
+            ("Geotextile", "Material", m.get("no_non_woven_geotextile"), "m2"),
+            ("Liner", "Material", m.get("liner_required"), "m2"),
+            ("Single Clip", "Material", m.get("no_single_clips"), "Each"),
+            ("Double Clip", "Material", m.get("no_double_clips"), "Each")]
+    return [{"item": i, "category": c, "quantity": q, "unit": u} for i, c, q, u in rows if q]
 
-    "tank_storage": storage,
 
-    # =====================================================
-    # HARDCODED PLAN VIEW VALUES
-    # =====================================================
-
-    "excavation_clearance": 500,
-
-    "cover_depth": 950,
-    "minimum_cover_depth": 500,
-
-    "fsl": 100.0,
-    "base_rl": 97.0,
-
-    # =====================================================
-    # PIPE DATA  (from JSON inlets / outlets)
-    # =====================================================
-
-    "inlets":   _build_pipes(raw.get("inlets",  []), "INLET"),
-    "outlets":  _build_pipes(raw.get("outlets", []), "OUTLET"),
-    "manholes": _build_manholes(raw.get("manholes", [])),
-    "pipes":    _build_pipes(raw.get("inlets", []), "INLET") +
-                _build_pipes(raw.get("outlets", []), "OUTLET"),
+_REQUIRED = {
+    "geometry": ("stack_length", "cover_depth"),
+    "input": ("layers_in_system", "fsl_user_input", "base_of_tank_level"),
+    "material": ("cubes_long", "cubes_wide", "tank_storage"),
 }
+
+
+def _validate(payload: dict) -> None:
+    missing = [f"{sec}.{key}" for sec, keys in _REQUIRED.items()
+               for key in keys if (payload.get(sec) or {}).get(key) is None]
+    if missing:
+        raise ValueError("payload is missing: " + ", ".join(missing))
+
+
+def build(payload: dict) -> dict:
+    _validate(payload)
+    g, inp, m = payload["geometry"], payload["input"], payload["material"]
+    proj = payload.get("project") or {}
+
+    cubes_long, cubes_wide = int(m["cubes_long"]), int(m["cubes_wide"])
+    layers = float(inp["layers_in_system"])
+    length, width = cubes_long * CUBE_MM, cubes_wide * CUBE_MM
+
+    stack_h = float(g["stack_length"])
+    full_rows = int(layers)
+    rows_mm = [LAYER_MM] * full_rows
+    if stack_h - LAYER_MM * full_rows > 1:                      # half layer on top
+        rows_mm.append(stack_h - LAYER_MM * full_rows)
+
+    fsl = float(inp["fsl_user_input"])
+    base_rl = float(inp["base_of_tank_level"])
+    cover = float(g["cover_depth"])
+    top_rl = base_rl + stack_h / 1000
+
+    storage = float(m["tank_storage"])
+    stack_label = STACK_LABEL.get(layers, f"{layers:g} STACK")
+
+    pipes = ([_pipe(p, "INLET", length, width, base_rl) for p in (m.get("inlet") or [])] +
+             [_pipe(p, "OUTLET", length, width, base_rl) for p in (m.get("outlet") or [])])
+    manholes = [_manhole(h, length, width, i) for i, h in enumerate(m.get("manhole") or [])]
+
+    drawn_date = proj.get("drawn_date") or _today()
+    if proj.get("project_lines"):
+        project_lines = list(proj["project_lines"])
+    else:
+        project_lines = [proj.get("project_name", "")]
+
+    # RL-style plan label: "5-CUBES ROW x 27-CUBES LONG"
+    return {
+        # ---- title block ------------------------------------------------------
+        "customer_code": proj.get("customer_code", ""),
+        "dwg_no":        proj.get("dwg_no", ""),
+        "request_no":    proj.get("request_no", ""),
+        "client_name":   proj.get("client_name", ""),
+        "drawn_date":    drawn_date,
+        "drawn_by":      "R.R.",
+        "scale":         "N.T.S",
+        "size":          "A3",
+        "rev_history":   proj.get("rev_history") or [["1", drawn_date, "R.R.", "INITIAL RELEASE"]],
+        "project_lines": project_lines,
+        "title_lines": [
+            "ATLAN CUBE",
+            f"ATLAN CUBE 1000L MODULE ({stack_label})",
+            f"{cubes_wide}-CUBES WIDE x {cubes_long}-CUBES LONG - {fmt_num(storage)}m3",
+            "GENERAL ARRANGEMENT",
+        ],
+
+        # ---- tank geometry (mm) -----------------------------------------------
+        "cubes_long": cubes_long, "cubes_wide": cubes_wide,
+        "layers": layers, "stack_label": stack_label,
+        "rows_mm": rows_mm, "stack_h": stack_h,
+        "length": length, "width": width,
+        "exc_length": length + 2 * EXC_MARGIN_MM,
+        "exc_width": width + 2 * EXC_MARGIN_MM,
+        "tank_storage": storage,
+
+        # ---- levels -----------------------------------------------------------
+        "fsl": fsl, "base_rl": base_rl, "top_rl": top_rl,
+        "cover": cover, "exc_depth": cover + stack_h,
+
+        # ---- pipework ---------------------------------------------------------
+        "pipes": pipes, "manholes": manholes,
+
+        # ---- tables / images --------------------------------------------------
+        "parts_list": _parts_list(m),
+        "components": _components(m),
+        "section_image": os.path.join(PAGE3_IMAGES_DIR, f"{layers:g}stack.png"),
+    }

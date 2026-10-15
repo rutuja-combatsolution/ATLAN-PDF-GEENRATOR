@@ -8,14 +8,14 @@ from reportlab.lib.units import mm
 from reportlab.lib.colors import black, white, HexColor
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-from page1 import draw_page1_tables, draw_page1_diagrams
-from page2 import draw_page2_image
-from page3 import draw_page3_annotations, draw_page3_image
+from page1 import draw_page1
+from page3 import draw_page2
+from page4 import draw_page4_components
+from Internal.elevation_view import draw_elevation_page
 import data_mapper
 
 _HERE  = os.path.dirname(os.path.abspath(__file__))
-OUTPUT = os.path.join(_HERE, "accurate_titleblock_fixed.pdf")
-PAGES  = 3
+OUTPUT = os.path.join(_HERE, "output", "general_arrangement.pdf")
 
 PW, PH = landscape(A3)
 
@@ -354,7 +354,7 @@ def draw_signatures(c, drawn_by="", drawn_date=""):
     x, y, w, h = X4, TB_BOT, C4W, TB_H
     draw_cell(c, x, y, w, h)
 
-    logo_path = r"C:\Users\shrad\OneDrive\Documents\Desktop\pdf gen\Atlan-Stormwater-LogoR.png"
+    logo_path = os.path.join(_HERE, "Atlan-Stormwater-LogoR.png")
     logo_w = w * 0.90
     logo_h = h * 0.70
     logo_x = x + (w - logo_w) / 2
@@ -456,157 +456,93 @@ def draw_project_info(c, project_lines=None, title_lines=None,
     content_bot = y + foot_h
     content_h   = content_top - content_bot
 
-    proj_row_h  = content_h * 0.30
-    proj_y      = content_top - proj_row_h
+    # PROJECT and TITLE: bold label, then the lines left-aligned and indented (as on the
+    # reference sheets)
+    indent  = x + 29
+    max_w   = x + w - PAD - indent
+    proj_row_h = content_h * 0.40
+    proj_y     = content_top - proj_row_h
 
     c.setLineWidth(CLW); c.setStrokeColor(black)
     c.line(x, proj_y, x + w, proj_y)
 
-    proj_text_y = proj_y + (proj_row_h - fs_label) / 2
-    lbl_str     = "PROJECT :"
-    lbl_w       = stringWidth(lbl_str, FB, fs_label)
-    val_gap     = 2
-    val_x       = x + PAD + lbl_w + val_gap
-    val_max_w   = w - PAD - lbl_w - val_gap - PAD
+    c.setFont(FB, 7.5); c.setFillColor(black)
+    c.drawString(x + PAD, content_top - 9, "PROJECT :")
+    c.setFont(FN, fs_val)
+    for i, line in enumerate(project_lines[:3]):
+        c.drawString(indent, content_top - 20 - i * 10,
+                     clip_text(line, FN, fs_val, max_w))
 
-    c.setFont(FB, fs_label); c.setFillColor(black)
-    c.drawString(x + PAD, proj_text_y, lbl_str)
-    c.setFont(FN, fs_val); c.setFillColor(black)
-    c.drawString(val_x, proj_text_y,
-                 clip_text(project_lines[0] if project_lines else "",
-                           FN, fs_val, val_max_w))
-
-    title_row_h = content_h * 0.22
-    title_y     = proj_y - title_row_h
-
-    c.setLineWidth(CLW); c.setStrokeColor(black)
-
-    title_lbl_y = title_y + (title_row_h - fs_label) / 2
-    c.setFont(FB, fs_label); c.setFillColor(black)
-    c.drawString(x + PAD, title_lbl_y, "TITLE")
-
-    title_content_h = title_y - content_bot
-    line_sp         = fs_title * 1.35
-    total_block_h   = (len(title_lines) - 1) * line_sp + fs_title
-    start_ty        = title_y - (title_content_h - total_block_h) / 2 - fs_title
-
+    c.setFont(FB, 7.5)
+    c.drawString(x + PAD, proj_y - 9, "TITLE")
+    c.setFont(FN, fs_title)
     for i, line in enumerate(title_lines):
-        ty = start_ty - i * line_sp
+        ty = proj_y - 20 - i * 10.8
         if ty < content_bot + PAD:
             break
-        c.setFont(FN, 10)
-        c.setFillColor(black)
-        c.drawCentredString(x + w / 2, ty,
-                            clip_text(line, FB, fs_title, w - 2 * PAD))
+        c.drawString(indent, ty, clip_text(line, FN, fs_title, max_w))
 
 
-def draw_full_page(c, page_num=1, total_pages=3, image_path="",
-                   drawn_by="", drawn_date="",
-                   scale="N.T.S", size="A3",
-                   customer_code="", dwg_no="",
-                   rev="", request_no="", client_name="",
-                   project_lines=None, title_lines=None, rev_history=None,
-                   drawing_data=None):
+# Sheet order: GA, back / left / right elevations, cross-section + specs, then the BOM.
+# Remove names here to drop a sheet - SHEET n OF N follows the list.
+SHEETS = ["ga", "back", "left", "right", "section", "bom"]
+GA_ONLY = ["ga", "section"]          # the two reference sheets (--ga-only)
 
-    if project_lines is None:
-        project_lines = [""]
-    if rev_history is None:
-        rev_history = []
 
-    sheet_of = f"{page_num} OF {total_pages}"
-
+def draw_full_page(c, kind, page_num, total_pages, dd):
     draw_page_border(c)
     draw_tolerance_bar(c)
-    draw_rev_table(c, rev_history)
-    draw_client_col(c, client_name)
-    draw_confidential(c, request_no, drawn_by, drawn_date)
-    draw_signatures(c, drawn_by, drawn_date)
-    draw_project_info(c, project_lines=project_lines, title_lines=title_lines,
-                      scale=scale, size=size, sheet_of=sheet_of, rev=rev,
-                      customer_code=customer_code, dwg_no=dwg_no)
+    draw_rev_table(c, dd["rev_history"])
+    draw_client_col(c, dd["client_name"])
+    draw_confidential(c, dd["request_no"], dd["drawn_by"], dd["drawn_date"])
+    draw_signatures(c, dd["drawn_by"], dd["drawn_date"])
+    draw_project_info(c, project_lines=dd["project_lines"], title_lines=dd["title_lines"],
+                      scale=dd["scale"], size=dd["size"],
+                      sheet_of=f"{page_num} OF {total_pages}",
+                      rev=str(dd["rev_history"][0][0]),
+                      customer_code=dd["customer_code"], dwg_no=dd["dwg_no"])
 
-    if page_num == 1:
-        draw_page1_tables(c, parts_list=drawing_data.get("parts_list") if drawing_data else None)
-        draw_page1_diagrams(c, drawing_data=drawing_data)
-    elif page_num == 2:
-        if image_path:
-            draw_page2_image(c, image_path)
-    elif page_num == 3:
-        draw_page3_annotations(c)
-        draw_page3_image(c, image_path=image_path)
-    else:
-        draw_y_centre = (TBAR_TOP + IY1) / 2
-        c.setFont(FN, 16)
-        c.setFillColor(HexColor("#BBBBBB"))
-        c.drawCentredString(PW / 2, draw_y_centre,
-                            f"Drawing Content — Page {page_num} of {total_pages}")
-        c.setFillColor(black)
+    if kind == "ga":
+        draw_page1(c, dd)
+    elif kind == "section":
+        draw_page2(c, dd["section_image"])
+    elif kind in ("back", "left", "right"):
+        draw_elevation_page(c, dd, kind, IX0, TBAR_TOP, IW, IY1 - TBAR_TOP)
+    elif kind == "bom":
+        draw_page4_components(c, dd["components"], project_name=dd["project_lines"][0])
 
 
-def generate(raw_data: dict, output=OUTPUT, num_pages=PAGES):
-    dd = data_mapper.build(raw_data)
+def generate(payload: dict, output=OUTPUT, sheets=None):
+    """payload: {"geometry":..., "input":..., "material":..., ["project": {...}]}"""
+    dd = data_mapper.build(payload)
+    sheets = list(sheets or SHEETS)
+    os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
 
     c = rl_canvas.Canvas(output, pagesize=landscape(A3))
-    c.setTitle("Atlan Stormwater - Title Block Template")
-    for i in range(1, num_pages + 1):
-        draw_full_page(
-            c,
-            page_num=i,
-            total_pages=num_pages,
-            image_path=dd["page2_image"] if i == 2 else dd["page3_image"],
-            title_lines=dd["title_lines"],
-            drawn_by=dd["drawn_by"],
-            scale=dd["scale"],
-            size=dd["size"],
-            customer_code=dd["customer_code"],
-            dwg_no=dd["dwg_no"],
-            rev=dd["rev"],
-            request_no=dd["request_no"],
-            project_lines=dd["project_lines"],
-            rev_history=dd["rev_history"],
-            drawing_data=dd,
-        )
+    c.setTitle("Atlan Stormwater - General Arrangement")
+    for i, kind in enumerate(sheets, start=1):
+        draw_full_page(c, kind, i, len(sheets), dd)
         c.showPage()
     c.save()
-    print(f"Saved: {output}  -  {num_pages} pages, A3 landscape")
+    print(f"Saved: {output}  -  {len(sheets)} sheets, A3 landscape")
+    return output
 
 
 if __name__ == "__main__":
-    try:
-        import json, sys
+    import argparse, json, sys
 
-        if len(sys.argv) > 1:
-            with open(sys.argv[1], encoding="utf-8") as f:
-                raw = json.load(f)
-        else:
-            raw = {
-                "customer_code": "24-59314",
-                "dwg_no":        "59314.P.01.10.GA",
-                "request_no":    "RN236248",
-                "drawn_date":    "2/04/2026",
-                "project_lines": [
-                    "BAROSSA GLENORCHY PARK LODGE - STAGE 2",
-                    "- 17A CLYDESDALE AVENUE, GLENORCHY",
-                ],
-                "stack_key":   "1",
-                "wide":        5,
-                "long":        12,
-                "storage_m3":  60,
-                "rev_history": [
-                    ["1", "2/04/2026", "R.R.", "INITIAL RELEASE"],
-                ],
-                "parts_list": [
-                    ["1", "1000L MODULE - HALF CUBE",              "18", ""],
-                    ["2", "1000L MODULE - SIDE PANEL FULL HEIGHT", "32", ""],
-                    ["3", "SINGLE CONNECTOR",                      "101", ""],
-                ],
-            }
+    ap = argparse.ArgumentParser(description="Atlan Stormwater GA drawing from an app payload.")
+    ap.add_argument("payload", help="payload JSON (geometry / input / material [/ project])")
+    ap.add_argument("-o", "--output", help="output PDF (default: output/<payload name>.pdf)")
+    ap.add_argument("--ga-only", action="store_true",
+                    help="only the two reference sheets (GA + cross-section)")
+    args = ap.parse_args()
 
-        generate(raw_data=raw)
-        print("Done! PDF saved to:", OUTPUT)
-    except Exception:
-        import traceback
-        traceback.print_exc()
-    finally:
-        input("\nPress Enter to close...")
+    # utf-8-sig drops a BOM; non-breaking spaces (common after copy/paste) are not valid
+    # JSON whitespace, so turn them into plain spaces before parsing
+    with open(args.payload, encoding="utf-8-sig") as f:
+        payload = json.loads(f.read().replace(" ", " "))
+    out = args.output or os.path.join(
+        _HERE, "output", os.path.splitext(os.path.basename(args.payload))[0] + ".pdf")
+    generate(payload, output=out, sheets=GA_ONLY if args.ga_only else None)
 

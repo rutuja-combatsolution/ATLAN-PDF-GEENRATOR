@@ -19,89 +19,149 @@ PAGE_W, PAGE_H = landscape(A3)
 # SOURCE DATA
 # ==========================================================
 
+# SOURCE_DATA = {
+#     "geometry": {
+#         "breadth_mm": 6950.0,
+#         "cover_depth": 660.0,
+#         "finished_surface_level": 3000.0,
+#         "height_mm": 3000.0,
+#         "length_mm": 15000.0,
+#         "minimum_cover_depth": 100.0,
+#         "outlet_invert_level": 3000.0,
+#         "stack_length": 2340.0,
+#         "stack_number":"double"
+#     },
+
+#     "input": {
+#         "project_name": "Stormwater Project 001",
+#         "available_depth_to_invert": 3.0,
+#         "base_of_tank_level": 97.0,
+#         "constraining_dimension": 15.0,
+#         "constraining_factor": "length",
+#         "fsl_user_input": 100.0,
+#         "include_liner": None,
+#         "layers_in_system": 3,
+#         "max_layers_possible": 3,#stack name value 
+#         "number_of_inlets": 2,
+#         "number_of_manholes": 1,
+#         "number_of_outlets": 1,
+#         "project_created": True,
+#         "target_storage_volume": 201.0,
+#         "volumn_provided": None
+#     },
+
+#     "material": {
+#         "cubes_long": 13,
+#         "cubes_wide": 6,
+
+#         "excavation_volume": 456.45,
+#         "final_backfill_required": 85.2,
+#         "initial_backfill_required": 127.3,
+
+#         "inlet": [
+#             {
+#                 "horizontal_offset": 0.0,
+#                 "id": "INLET-1",
+#                 "invert_level": 0.0,
+#                 "side": "left",
+#                 "diameter": 375,
+#                   "panel_x": 0,
+#                 "panel_y": 2
+#             },
+#             {
+#                 "horizontal_offset": 2.78,
+#                 "id": "INLET-2",
+#                 "invert_level": 0.0,
+#                 "side": "left",
+#                 "diameter": 375,
+#                   "panel_x": 0,
+#                 "panel_y": 4
+#             }
+#         ],
+
+#         "manhole": [
+#             {
+#                 "horizontal_offset": 0.0,
+#                 "id": "MH-1",
+#                 "invert_level": 0.0,
+#                 "side": "top"
+#             }
+#         ],
+
+#         "outlet": [
+#             {
+#                 "horizontal_offset": 0.0,
+#                 "id": "OUTLET-1",
+#                 "invert_level": 0.0,
+#                 "side": "right",
+#                 "diameter": 375,
+#                   "panel_x": 12,
+#                 "panel_y": 2
+#             }
+#         ],
+
+#         "tank_storage": 234.0
+#     }
+# }
+
 SOURCE_DATA = {
+   {
     "geometry": {
-        "breadth_mm": 6950.0,
-        "cover_depth": 660.0,
+        "breadth_mm": 1190.0,
+        "cover_depth": 1010.0,
         "finished_surface_level": 3000.0,
         "height_mm": 3000.0,
-        "length_mm": 15000.0,
+        "length_mm": 66740.0,
         "minimum_cover_depth": 100.0,
         "outlet_invert_level": 3000.0,
-        "stack_length": 2340.0,
-        "stack_number":"double"
+        "stack_length": 1990.0,
+        "stack_number": "Double"
     },
-
     "input": {
-        "project_name": "Stormwater Project 001",
         "available_depth_to_invert": 3.0,
         "base_of_tank_level": 97.0,
-        "constraining_dimension": 15.0,
+        "constraining_dimension": 67.0,
         "constraining_factor": "length",
         "fsl_user_input": 100.0,
         "include_liner": None,
-        "layers_in_system": 3,
-        "max_layers_possible": 3,#stack name value 
-        "number_of_inlets": 2,
-        "number_of_manholes": 1,
-        "number_of_outlets": 1,
+        "layers_in_system": 2.5,
+        "max_layers_possible": 3.0,
+        "maximum_groundwater_level_m_ahd": 0.0,
+        "number_of_inlets": 0,
+        "number_of_manholes": 0,
+        "number_of_outlets": 0,
         "project_created": True,
-        "target_storage_volume": 201.0,
-        "volumn_provided": None
+        "target_storage_volume": 22.35,
+        "volumn_provided": 145.0
     },
-
     "material": {
-        "cubes_long": 13,
-        "cubes_wide": 6,
-
-        "excavation_volume": 456.45,
-        "final_backfill_required": 85.2,
-        "initial_backfill_required": 127.3,
-
-        "inlet": [
-            {
-                "horizontal_offset": 0.0,
-                "id": "INLET-1",
-                "invert_level": 0.0,
-                "side": "left",
-                "diameter": 375,
-                  "panel_x": 0,
-                "panel_y": 2
-            },
-            {
-                "horizontal_offset": 2.78,
-                "id": "INLET-2",
-                "invert_level": 0.0,
-                "side": "left",
-                "diameter": 375,
-                  "panel_x": 0,
-                "panel_y": 4
-            }
-        ],
-
-        "manhole": [
-            {
-                "horizontal_offset": 0.0,
-                "id": "MH-1",
-                "invert_level": 0.0,
-                "side": "top"
-            }
-        ],
-
-        "outlet": [
-            {
-                "horizontal_offset": 0.0,
-                "id": "OUTLET-1",
-                "invert_level": 0.0,
-                "side": "right",
-                "diameter": 375,
-                  "panel_x": 12,
-                "panel_y": 2
-            }
-        ],
-
-        "tank_storage": 234.0
+        "cubes_long": 58,
+        "cubes_wide": 1,
+        "excavation_volume": 445.05,
+        "final_backfill_required": 208.32,
+        "initial_backfill_required": 294.66,
+        "inlet": None,
+        "liner_required": 344.35,
+        "manhole": None,
+        "metres_long": 66.74,
+        "metres_wide": 1.19,
+        "no_double_clips": 114,
+        "no_full_cubes": 116,
+        "no_full_side_plates": 236,
+        "no_half_cubes": 290,
+        "no_half_side_plates": 118,
+        "no_non_woven_geotextile": 529.71,
+        "no_side_plates": 236,
+        "no_single_clips": 114,
+        "number_of_inlets": 0,
+        "number_of_manholes": 0,
+        "number_of_outlets": 0,
+        "outlet": None,
+        "system_footprint": 79.42,
+        "tank_storage": 145.0
     }
+}
+
 }
 
 # ==========================================================

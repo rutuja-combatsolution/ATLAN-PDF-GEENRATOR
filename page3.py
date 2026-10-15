@@ -1,161 +1,118 @@
-# page3.py — Page 3 content: cross-section design image + spec annotation text.
+# page3.py - Sheet 2: trench cross-section (static image chosen by layer count)
+# with the backfill / bedding specification text underneath.
 
 import os
 
 from reportlab.lib.colors import black
-from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A3, landscape
+from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.lib.utils import ImageReader
 
-PW, PH   = landscape(A3)
-IM       = 10 * mm
-IX0      = IM;   IX1 = PW - IM;   IW  = IX1 - IX0
-IY0      = IM;   IY1 = PH - IM
-TBAR_H   = 6 * mm
-TB_H     = 45 * mm
-TBAR_BOT = IY0 + TB_H
-TBAR_TOP = TBAR_BOT + TBAR_H
+PW, PH = landscape(A3)
+IM = 10 * mm
+IX0, IX1 = IM, PW - IM
+IW = IX1 - IX0
+IY1 = PH - IM
+TBAR_TOP = IM + 45 * mm + 6 * mm
 
-FN  = "Helvetica"
-FB  = "Helvetica-Bold"
-PAD = 1.0 * mm
+FN, FB = "Helvetica", "Helvetica-Bold"
+
+FS_HDR, FS_BODY, LEAD, SEC_GAP = 10, 9.5, 12.3, 9
+
+LEFT_SECTIONS = [
+    ("FINAL BACKFILL", [
+        "Depth: 500mm minimum",
+        "Compaction: To 95% MDD minimum - Compact in 100mm layers",
+        "Material Shape: Angular",
+        "Size: Not larger than 20mm diameter",
+        "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
+        "Applicability: Stone, road-base or compacted granular material (non-cohesive) is acceptable "
+        "if it meets these requirements. In NO case shall clays/cohesive soils be used. Ensure that "
+        "any site specifications are considered for pavement make-up",
+    ]),
+    ("INITIAL BACKFILL", [
+        "Depth: 100mm",
+        "Compaction: 300kg Walk Behind Reversible Compactor",
+        "Material Shape: Sand or crushed rock",
+        "Size: Not larger than 20mm diameter",
+        "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
+        "Applicability: Clean washed Sand with no clay or foreign particles. In NO case shall "
+        "clays/cohesive soils be used",
+    ]),
+]
+
+RIGHT_SECTIONS = [
+    ("SIDES BACKFILL", [
+        "Width: 500-600mm (each side) or as required onsite",
+        "Compaction: To 95% MDD minimum - Compact in layers",
+        "Material Shape: Angular",
+        "Size: Not larger than 20mm diameter",
+        "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
+        "Applicability: Stone or sand is acceptable if it meets these requirements. In NO case "
+        "shall clays/cohesive soils be used",
+    ]),
+    ("BASE / BEDDING", [
+        "Depth: 50mm-100mm",
+        "Compaction: To 95% MDD minimum",
+        "Material Shape: Angular",
+        "Size: Not larger than 20mm diameter",
+        "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
+        "Applicability: Stone or sand is acceptable if it meets these requirements. In NO case "
+        "shall clays/cohesive soils be used",
+    ]),
+    ("SUBGRADE", ["Compaction: To 100kPa"]),
+]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Word-wrap helper: breaks `text` into lines that fit within `max_w` at the
-# given font/size. Returns a list of strings.
-# ─────────────────────────────────────────────────────────────────────────────
 def _wrap(text, font, size, max_w):
-    words  = text.split()
-    lines  = []
-    current = ""
-    for word in words:
-        test = (current + " " + word).strip()
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        test = (cur + " " + w).strip()
         if stringWidth(test, font, size) <= max_w:
-            current = test
+            cur = test
         else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines if lines else [text]
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines or [text]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 – DESIGN IMAGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def draw_page3_image(c, image_path=""):
-
-    w = IW * 0.95
-    h = (IY1 - TBAR_TOP) * 0.60
-
-    x = IX0 + (IW - w) / 2
-    y = IY1 - h - 5 * mm
-
+def draw_page2(c, image_path):
+    """Cross-section image across the top, specification text in two columns below."""
+    top = IY1 - 5 * mm
+    img_w, img_h = IW * 0.95, (IY1 - TBAR_TOP) * 0.56
     if os.path.isfile(image_path):
-        c.drawImage(
-            image_path,
-            x, y,
-            width=w, height=h,
-            preserveAspectRatio=True,
-            mask='auto'
-        )
+        iw, ih = ImageReader(image_path).getSize()
+        k = min(img_w / iw, img_h / ih)
+        img_w, img_h = iw * k, ih * k
+        c.drawImage(image_path, IX0 + (IW - img_w) / 2, top - img_h, width=img_w, height=img_h,
+                    mask="auto")
+    else:
+        img_h = 0
 
+    text_top = top - img_h - 18
+    floor = TBAR_TOP + 4
+    left_x = IX0 + 37
+    right_x = IX0 + IW * 0.55
+    left_w = right_x - left_x - 20
+    right_w = IX1 - right_x - 24
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 – ANNOTATION TEXT
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def draw_page3_annotations(c):
-    DRAW_BOT = TBAR_TOP
-    DRAW_H   = IY1 - DRAW_BOT
-
-    LEFT_X  = IX0 + 7 * mm
-    RIGHT_X = IX0 + IW * 0.55
-
-    # Column widths — used for word-wrapping
-    COL_W_LEFT  = (IX0 + IW * 0.55) - LEFT_X  - 4 * mm   # up to right col start
-    COL_W_RIGHT = IX1 - RIGHT_X - 4 * mm                  # up to right border
-
-    TEXT_START_Y = DRAW_BOT + DRAW_H * 0.30
-    TEXT_BOT     = DRAW_BOT + 2 * mm
-
-    # FIX: header 9pt (12pt was too large — overran column), body 8pt
-    FS_HDR   = 9.0
-    FS_BODY  = 8.0
-    LEAD     = FS_BODY * 1.30    # body line leading
-    HDR_LEAD = FS_HDR  * 1.50   # gap consumed after header baseline
-    SEC_GAP  = 5.0               # extra gap between sections
-
-    # Each body item is now ONE complete sentence — _wrap() handles line breaks
-    left_sections = [
-        ("FINAL BACKFILL", [
-            "Depth: 500mm minimum",
-            "Compaction: To 95% MDD minimum - Compact in 100mm layers",
-            "Material Shape: Angular",
-            "Size: Not larger than 20mm diameter",
-            "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
-            "Applicability: Stone, road-base or compacted granular material (non-cohesive) is acceptable if it meets these requirements. In NO case shall clays/cohesive soils be used. Ensure that any site specifications are considered for pavement make-up",
-        ]),
-        ("INITIAL BACKFILL", [
-            "Depth: 100mm",
-            "Compaction: 300kg Walk Behind Reversible Compactor",
-            "Material Shape: Sand or crushed rock",
-            "Size: Not larger than 20mm diameter",
-            "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
-            "Applicability: Clean washed Sand with no clay or foreign particles. In NO case shall clays/cohesive soils be used",
-        ]),
-    ]
-
-    right_sections = [
-        ("SIDES BACKFILL", [
-            "Width: 500-600mm (each side) or as required onsite",
-            "Compaction: To 95% MDD minimum - Compact in layers",
-            "Material Shape: Angular",
-            "Size: Not larger than 20mm diameter",
-            "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
-            "Applicability: Stone or sand is acceptable if it meets these requirements. In NO case shall clays/cohesive soils be used",
-        ]),
-        ("BASE / BEDDING", [
-            "Depth: 50mm-100mm",
-            "Compaction: To 95% MDD minimum",
-            "Material Shape: Angular",
-            "Size: Not larger than 20mm diameter",
-            "Consistency: Free of lumps, debris and sharp objects that could puncture the geotextile",
-            "Applicability: Stone or sand is acceptable if it meets these requirements. In NO case shall clays/cohesive soils be used",
-        ]),
-        ("SUBGRADE", [
-            "Compaction: To 100kPa",
-        ]),
-    ]
-
-    def render_column(col_x, sections, col_w):
-        cur_y = TEXT_START_Y
+    def column(x, sections, width, y):
         for hdr, lines in sections:
-            if cur_y < TEXT_BOT:
-                break
-
-            # Section header — bold, no wrap needed (short)
             c.setFont(FB, FS_HDR)
             c.setFillColor(black)
-            c.drawString(col_x, cur_y, hdr)
-            cur_y -= HDR_LEAD
-
-            # Body lines — wrap each entry to column width
+            c.drawString(x, y, hdr)
+            y -= LEAD + 1
             c.setFont(FN, FS_BODY)
             for entry in lines:
-                wrapped = _wrap(entry, FN, FS_BODY, col_w)
-                for wline in wrapped:
-                    if cur_y < TEXT_BOT:
-                        break
-                    c.drawString(col_x, cur_y, wline)
-                    cur_y -= LEAD
-                if cur_y < TEXT_BOT:
-                    break
+                for wl in _wrap(entry, FN, FS_BODY, width):
+                    if y < floor:
+                        return
+                    c.drawString(x, y, wl)
+                    y -= LEAD
+            y -= SEC_GAP
 
-            cur_y -= SEC_GAP   # extra space between sections
-
-    render_column(LEFT_X,  left_sections,  COL_W_LEFT)
-    render_column(RIGHT_X, right_sections, COL_W_RIGHT)
+    column(left_x, LEFT_SECTIONS, left_w, text_top)
+    column(right_x, RIGHT_SECTIONS, right_w, text_top)

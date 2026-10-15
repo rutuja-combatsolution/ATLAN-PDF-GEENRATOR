@@ -1,0 +1,35 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Installed packages / virtual environments
+venv/
+.venv/
+env/
+ENV/
+site-packages/
+*.egg-info/
+build/
+dist/
+
+# Secrets / local config
+.env
+.env.*
+
+# Generated output
+output/
+tmp/
+
+# OS junk
+.DS_Store
+__MACOSX/
+Thumbs.db
+desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/

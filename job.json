@@ -22,6 +22,13 @@
         ["5", "INSPECTION RISER",                        "2", ""],
         ["6", "GEOTEXTILE WRAP",                         "1", "m²"]
     ],
+    "components": [
+        {"item": "Atlan Cubes", "category": "Material", "quantity": 156,    "unit": "Each"},
+        {"item": "Side Plates",    "category": "Material", "quantity": 64,     "unit": "Each"},
+        {"item": "Geotextile",     "category": "Material", "quantity": 202.86, "unit": "m2"},
+        {"item": "Single Clip",    "category": "Material", "quantity": 124,    "unit": "Each"},
+        {"item": "Double Clip",    "category": "Material", "quantity": 62,     "unit": "Each"}
+    ],
     "inlets": [
         {
             "id": "INLET-1",
