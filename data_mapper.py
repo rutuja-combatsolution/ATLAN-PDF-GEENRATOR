@@ -106,8 +106,7 @@ def _manhole(m: dict, length: float, width: float, idx: int) -> dict:
         "x": min(max(length / 2 + (off_mm if OFFSET_RIGHT_POSITIVE else -off_mm), 0), length),
         "y": min(max(width / 2 + float(m.get("top_depth_offset") or 0) * 1000, 0), width),
         "shape": shape,
-        "w_mm": w_mm, "h_mm": h_mm,          # true footprint, used by the plan view
-        "size": 600,                         # riser width used by the elevations (unchanged)
+        "w_mm": w_mm, "h_mm": h_mm,          # true footprint: plan view, and riser width in the elevations
     }
 
 

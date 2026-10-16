@@ -605,7 +605,7 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
 
     def margin(x_edge, align, pref_y, direction):
         """Slots stacked in a side margin: direction 0 = alternate about pref_y, +1 up, -1 down."""
-        step = LEAD * 4 + 3
+        step = LEAD * 3 + 3
         out = []
         for k in range(16):
             n = k if direction else (k + 1) // 2
@@ -624,7 +624,7 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
 
     for grp, ax, ay in sorted(anchors, key=lambda t: (t[0][0]["side"], t[2], t[1])):
         for kind, p in _callout_items(grp):
-            lines = [kind, f"Ø{p['diameter']:g} PIPE", f"IL {fmt_rl(p['il'])}", "BY OTHERS"]
+            lines = [kind, f"Ø{p['diameter']:g} PIPE", f"IL {fmt_rl(p['il'])}"]
             side = p["side"]
             if side == "left":
                 put(lines, (ax, ay), margin(col_left, "r", ay + 14, 0))
@@ -637,7 +637,7 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
                 stair = [c_ for y_ in rows_y for c_ in ((ax + 4, "l", y_), (ax - 4, "r", y_))]
                 put(lines, (ax, ay), beside(ax, red[1] - 3) + beside(ax, chain_y - 12) + stair)
 
-    agg = ["AGG DRAIN", "Ø100", f"IL {fmt_rl(d['base_rl'])}", "BY OTHERS"]
+    agg = ["AGG DRAIN", "Ø100", f"IL {fmt_rl(d['base_rl'])}"]
     put(agg, agg_anchor, margin(col_left, "r", gy + 12, -1))
 
     # ---- title ------------------------------------------------------------------

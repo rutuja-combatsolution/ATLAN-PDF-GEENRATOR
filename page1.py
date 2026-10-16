@@ -16,8 +16,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from Internal.plan_view import draw_plan_view, plan_margins, FN, FB
-from Internal.elevation_view import (draw_elevation_view, left_need,
-                                      ELEV_BASE, ELEV_ABOVE, ELEV_RIGHT_NEED)
+from Internal.elevation_view import (draw_elevation_view, left_need, elev_base, right_need,
+                                      ELEV_ABOVE)
 
 PW, PH = landscape(A3)
 IM = 10 * mm
@@ -246,10 +246,10 @@ def _scale(d, left, top, bottom):
         off, _w = _x_extent(d, s, l, r)
         ex = max(525 * s, 12)
         s = min((LIMIT - left - off - ex - r) / d["length"],
-                (LIMIT - left - off - ELEV_RIGHT_NEED) / d["length"])
+                (LIMIT - left - off - right_need(d)) / d["length"])
     avail = top - bottom - t - b
-    s_fixed = (avail - ELEV_BASE - ELEV_ABOVE) / (d["exc_width"] + d["stack_h"])
-    s_cover = (avail - ELEV_BASE - 44) / (d["exc_width"] + d["stack_h"] + d["cover"])
+    s_fixed = (avail - elev_base(d) - ELEV_ABOVE) / (d["exc_width"] + d["stack_h"])
+    s_cover = (avail - elev_base(d) - 44) / (d["exc_width"] + d["stack_h"] + d["cover"])
     return min(s, s_fixed, s_cover)
 
 
@@ -265,12 +265,12 @@ def draw_page1(c, d):
     l, r, t, b = plan_margins(d)
     ex = max(525 * s, 12)
     plan_h = t + d["width"] * s + 2 * ex + b
-    elev_h = ELEV_BASE + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
+    elev_h = elev_base(d) + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
     gap3 = max((top - bottom) - plan_h - elev_h, 0) / 3   # above plan / between / below elevation
     off, _w = _x_extent(d, s, l, r)
     mx = left + off                                      # module left edge
     my = top - gap3 - t - ex - d["width"] * s            # module bottom edge
-    ey = bottom + gap3 + ELEV_BASE                       # elevation base
+    ey = bottom + gap3 + elev_base(d)                    # elevation base
     elev_top = ey + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
     draw_plan_view(c, d, mx, my, s, floor_y=elev_top + 2)
     draw_elevation_view(c, d, mx, ey, s, view="front")
