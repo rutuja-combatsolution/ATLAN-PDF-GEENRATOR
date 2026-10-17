@@ -6,10 +6,15 @@
 #
 # Plan and front elevation are drawn at ONE scale in the area left of that column - the
 # scale shrinks until every dimension and callout fits, so a long tank can never run into
-# the column. Spare height is shared evenly above the plan, between plan and elevation, and
-# below the elevation.
+# the column. Normally the elevation sits below the plan (spare height shared evenly above the
+# plan, between plan and elevation, and below the elevation); a tall narrow tank, where that
+# leaves too little room, puts the elevation to the right of the plan instead - whichever
+# layout gives the larger scale wins.
+
+import io
 
 from reportlab.lib import colors
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.colors import black
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib.units import mm
@@ -253,24 +258,99 @@ def _scale(d, left, top, bottom):
     return min(s, s_fixed, s_cover)
 
 
+def _measure_elev(d, s):
+    """(room above top of storage, room left of the tank, room right of it) in pt that the front
+    elevation really takes at scale s, found by drawing it once on a scratch canvas: on a narrow tank
+    its callouts stack upward and sprawl sideways, outgrowing any fixed allowance."""
+    m = draw_elevation_view(Canvas(io.BytesIO()), d, 0, 0, s, view="front")
+    return (max(m["used_top"] - d["stack_h"] * s, ELEV_ABOVE, d["cover"] * s + 44),
+            max(left_need(d), -m["used_x"][0]),
+            max(right_need(d), m["used_x"][1] - d["length"] * s))
+
+
+def _plan_h(d, s):
+    l, r, t, b = plan_margins(d)
+    return t + d["width"] * s + 2 * max(525 * s, 12) + b
+
+
+def _stack_scale(d, left, top, bottom):
+    """Scale when the plan sits above the elevation: _scale() with the elevation's real height."""
+    s = _scale(d, left, top, bottom)
+    fits = lambda s: (_plan_h(d, s) + elev_base(d) + d["stack_h"] * s + _measure_elev(d, s)[0]
+                      <= top - bottom + 0.5)
+    if fits(s):
+        return s
+    lo, hi = 0.0, s
+    for _ in range(14):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+    return lo
+
+
+def _side_scale(d, left, top, bottom, floor=0.0, gap=10):
+    """Scale when the elevation sits right of the plan: the plan may use the full height, but both
+    views' margins (callouts, dimensions) now share the sheet width. An estimate first; only when it
+    could beat `floor` (the stacked scale) is it refined against the elevation's measured size."""
+    l, r, t, b = plan_margins(d)
+    avail, width = top - bottom, LIMIT - left
+    s = 0.01
+    for _ in range(6):                                  # the red offset depends on s
+        ex = max(525 * s, 12)
+        s = min((avail - t - b - 2 * ex) / d["width"],
+                (width - gap - l - r - 2 * ex - left_need(d) - right_need(d)) / (2 * d["length"]),
+                (avail - elev_base(d) - 44) / (d["stack_h"] + d["cover"]))
+    if s <= floor:
+        return s
+
+    def fits(s):
+        above, nl, nr = _measure_elev(d, s)
+        return (l + 2 * max(525 * s, 12) + d["length"] * s + r + gap + nl + d["length"] * s + nr <= width
+                and elev_base(d) + d["stack_h"] * s + above <= avail)
+    if fits(s):
+        return s
+    lo, hi = 0.0, s
+    for _ in range(12):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+    return lo
+
+
 def draw_page1(c, d):
     bottom = TBAR_TOP + 6
     left = IX0 + 6
     top = IY1 - 6                                         # whole left area is free for the drawings
-    s = _scale(d, left, top, bottom)
+    s_stack = _stack_scale(d, left, top, bottom)
+    s_side = _side_scale(d, left, top, bottom, floor=s_stack)
+    side = s_side > s_stack     # tall narrow tank: stacking leaves no room, so go side by side
+    s = s_side if side else s_stack
 
     _draw_column(c, d)
 
-    # --- plan + elevation, one scale; spare height shared in three equal gaps -------------
     l, r, t, b = plan_margins(d)
     ex = max(525 * s, 12)
-    plan_h = t + d["width"] * s + 2 * ex + b
-    elev_h = elev_base(d) + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
+    plan_h = _plan_h(d, s)
+    above, need_l, need_r = _measure_elev(d, s)
+    elev_h = elev_base(d) + d["stack_h"] * s + above
+
+    if side:   # plan left, elevation right, both centred on the sheet's free height
+        plan_w = l + 2 * ex + d["length"] * s + r
+        elev_w = need_l + d["length"] * s + need_r
+        pad = max((LIMIT - left - plan_w - elev_w) / 3, 0)
+        cy = (top + bottom) / 2
+        mx = left + pad + l + ex
+        my = cy - plan_h / 2 + b + ex
+        draw_plan_view(c, d, mx, my, s)
+        draw_elevation_view(c, d, left + pad + plan_w + pad + need_l,
+                            cy - elev_h / 2 + elev_base(d), s, view="front")
+        return
+
+    # --- plan + elevation, one scale; spare height shared in three equal gaps -------------
     gap3 = max((top - bottom) - plan_h - elev_h, 0) / 3   # above plan / between / below elevation
     off, _w = _x_extent(d, s, l, r)
-    mx = left + off                                      # module left edge
+    block_w = off + d["length"] * s + max(ex + r, need_r)
+    mx = left + max((LIMIT - left - block_w) / 2, 0) + off   # module left edge; block centred in the free width
     my = top - gap3 - t - ex - d["width"] * s            # module bottom edge
     ey = bottom + gap3 + elev_base(d)                    # elevation base
-    elev_top = ey + d["stack_h"] * s + max(ELEV_ABOVE, d["cover"] * s + 44)
+    elev_top = ey + d["stack_h"] * s + above
     draw_plan_view(c, d, mx, my, s, floor_y=elev_top + 2)
     draw_elevation_view(c, d, mx, ey, s, view="front")

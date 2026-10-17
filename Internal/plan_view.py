@@ -319,12 +319,29 @@ def _group_pipes(pipes):
     return groups
 
 
-def _callout_items(grp):
-    """One callout per pipe, except an inlet+outlet pair of identical size/level -> INLET/OUTLET."""
-    if (len(grp) == 2 and grp[0]["kind"] != grp[1]["kind"] and
-            grp[0]["diameter"] == grp[1]["diameter"] and abs(grp[0]["il"] - grp[1]["il"]) < 1e-6):
-        return [("INLET/OUTLET", grp[0])]
-    return [(p["kind"], p) for p in grp]
+def group_lines(grp):
+    """Text of the ONE callout for the pipes on one line (same wall position) - repeats collapse.
+
+    One size/level  -> INLET (or OUTLET, or INLET/OUTLET) / Ø150 PIPE / IL 97.00
+    Several         -> each kind as a header, then a line per level listing its diameters:
+                       INLET / Ø750 / Ø150  IL 97.00 / OUTLET / Ø150  IL 98.00
+    """
+    from data_mapper import fmt_rl                      # local import keeps Internal/ standalone-importable
+    kinds = [k for k in ("INLET", "OUTLET") if any(p["kind"] == k for p in grp)]
+    specs = {(p["diameter"], round(p["il"], 3)) for p in grp}
+    if len(specs) == 1:
+        (dia, il), = specs
+        return ["/".join(kinds), f"Ø{dia:g} PIPE", f"IL {fmt_rl(il)}"]
+    lines = []
+    for k in kinds:
+        by_il = {}
+        for p in grp:
+            if p["kind"] == k:
+                by_il.setdefault(round(p["il"], 3), set()).add(p["diameter"])
+        lines.append(k)
+        lines += [f"{' / '.join(f'Ø{x:g}' for x in sorted(by_il[il], reverse=True))}  IL {fmt_rl(il)}"
+                  for il in sorted(by_il)]
+    return lines
 
 
 STATS = {"masked": 0}          # callouts that found no clear spot (diagnostics / tests)
@@ -603,9 +620,9 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
         leader(c, lx, ytop - SIZE + 2.4, anchor[0], anchor[1])
         drawn_leaders.extend(leader_of(chosen))
 
-    def margin(x_edge, align, pref_y, direction):
+    def margin(x_edge, align, pref_y, direction, lines=3):
         """Slots stacked in a side margin: direction 0 = alternate about pref_y, +1 up, -1 down."""
-        step = LEAD * 3 + 3
+        step = LEAD * lines + 3
         out = []
         for k in range(16):
             n = k if direction else (k + 1) // 2
@@ -623,19 +640,18 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
         return out
 
     for grp, ax, ay in sorted(anchors, key=lambda t: (t[0][0]["side"], t[2], t[1])):
-        for kind, p in _callout_items(grp):
-            lines = [kind, f"Ø{p['diameter']:g} PIPE", f"IL {fmt_rl(p['il'])}"]
-            side = p["side"]
-            if side == "left":
-                put(lines, (ax, ay), margin(col_left, "r", ay + 14, 0))
-            elif side == "right":
-                put(lines, (ax, ay), margin(col_right, "l", ay + 14, 0))
-            elif side == "top":      # beside the arrow, between the border and the dimension rows
-                put(lines, (ax, ay), beside(ax, red[3] + 34))
-            else:                    # beside the arrow, then below the chain, then a staircase of rows
-                rows_y = [chain_y - 12 - k * (LEAD * len(lines) + 4) for k in range(3)]
-                stair = [c_ for y_ in rows_y for c_ in ((ax + 4, "l", y_), (ax - 4, "r", y_))]
-                put(lines, (ax, ay), beside(ax, red[1] - 3) + beside(ax, chain_y - 12) + stair)
+        lines = group_lines(grp)                            # one callout per line of pipes
+        side = grp[0]["side"]
+        if side == "left":
+            put(lines, (ax, ay), margin(col_left, "r", ay + 14, 0, len(lines)))
+        elif side == "right":
+            put(lines, (ax, ay), margin(col_right, "l", ay + 14, 0, len(lines)))
+        elif side == "top":      # beside the arrow, between the border and the dimension rows
+            put(lines, (ax, ay), beside(ax, red[3] + 34))
+        else:                    # beside the arrow, then below the chain, then a staircase of rows
+            rows_y = [chain_y - 12 - k * (LEAD * len(lines) + 4) for k in range(3)]
+            stair = [c_ for y_ in rows_y for c_ in ((ax + 4, "l", y_), (ax - 4, "r", y_))]
+            put(lines, (ax, ay), beside(ax, red[1] - 3) + beside(ax, chain_y - 12) + stair)
 
     agg = ["AGG DRAIN", "Ø100", f"IL {fmt_rl(d['base_rl'])}"]
     put(agg, agg_anchor, margin(col_left, "r", gy + 12, -1))

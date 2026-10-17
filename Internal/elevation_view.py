@@ -18,7 +18,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from Internal import cube_art
 from Internal.plan_view import (FN, FB, arrowhead, dim_h, dim_v, draw_flow_arrow,
                                 leader, text_block, underlined_title, _seg_hits_box,
-                                _group_pipes, _callout_items)
+                                _group_pipes, group_lines)
 
 # view -> (face we look at, side shown at picture-left, side shown at picture-right)
 # Plan orientation: front = bottom edge ("bottom"), back = top edge ("top").
@@ -39,29 +39,34 @@ ELEV_ABOVE = 72            # room above top of storage: callouts, 500 extension
 ELEV_RIGHT_NEED = 52       # 500 dimension, right pipe stub + arrow
 
 LS, LD = 7, 8.0            # pipe callout text size / leading (same as the plan view)
-NL = 3                     # text lines of a pipe callout
-ROW_H = LD * NL + 8        # one row of pipe callouts under the tank
-MID = 4 * NL - 7           # callout's first baseline above its vertical centre (see block_box)
+NL = 3                     # text lines of a single-pipe callout
 
 
-def _pipe_lines(kind, p):
-    """Callout text of a pipe - the same lines as in the plan view."""
-    from data_mapper import fmt_rl
-    return [kind, f"Ø{p['diameter']:g} PIPE", f"IL {fmt_rl(p['il'])}"]
+def _stub_labels(pipes):
+    """Pipes of one side wall seen side-on, grouped by invert level: pipes at one level sit on one
+    line however their sizes differ, so each level gets ONE callout (lowest first)."""
+    by = {}
+    for p in pipes:
+        by.setdefault(round(p["il"], 3), []).append(p)
+    return sorted(by.values(), key=lambda g: min(q["z"] - q["diameter"] / 2 for q in g))
 
 
 def _stub_lbl_w(d, side):
     """Width (pt) of the widest callout beside the side-on stubs of one wall (0: no stubs)."""
     return max((stringWidth(t, FN, LS)
-                for g in _stub_groups([p for p in d["pipes"] if p["side"] == side])
-                for t in _pipe_lines("/".join(g["kinds"]), g["p"])), default=0)
+                for g in _stub_labels([p for p in d["pipes"] if p["side"] == side])
+                for t in group_lines(g)), default=0)
 
 
-def _face_items(d, view):
-    """Pipes on the wall we look at, as plan-style callout items [(INLET/OUTLET/..., pipe)]."""
+def _face_groups(d, view):
+    """Pipes on the wall we look at, grouped by position: each group (one line) gets one callout."""
     face = VIEWS[view][0]
-    return [it for g in _group_pipes([p for p in d["pipes"] if p["side"] == face])
-            for it in _callout_items(g)]
+    return _group_pipes([p for p in d["pipes"] if p["side"] == face])
+
+
+def _row_h(d, view):
+    """Height (pt) of one row of face-pipe callouts: the tallest callout plus a gap."""
+    return LD * max((len(group_lines(g)) for g in _face_groups(d, view)), default=NL) + 8
 
 
 def _stub_groups(pipes):
@@ -76,12 +81,12 @@ def _stub_groups(pipes):
 
 def label_rows(d, view):
     """Rows of callouts under the tank for the face pipes (staggered when there are several)."""
-    return min(len(_face_items(d, view)), 2)
+    return min(len(_face_groups(d, view)), 2)
 
 
 def elev_base(d, view="front"):
     """Room (pt) needed under the tank: base RL label, pipe callout rows, title."""
-    return ELEV_BASE + ROW_H * label_rows(d, view)
+    return ELEV_BASE + _row_h(d, view) * label_rows(d, view)
 
 
 def right_need(d, view="front"):
@@ -216,7 +221,7 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
 
     # ---- manhole risers (on top of the tank, up to FSL) ------------------------
     # as wide as the manhole itself (600 square / 600 round / 300 round ...) - the plan's size
-    # differences carry over. Square: flat lid slab; circular: cylinder with an elliptical lid.
+    # differences carry over. Every shape (square or round) is drawn the same: riser + flat lid slab.
     # Like the plan, a scale too small to show the smallest riser enlarges all by one factor.
     mh_w = [(mh["h_mm"] if end_on else mh["w_mm"]) * s for mh in d["manholes"]]
     boost = max(1.0, 5.2 / min(mh_w)) if mh_w and min(mh_w) > 0 else 1.0
@@ -229,16 +234,9 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
         rh = max(y_fsl - y_top, 6)
         c.setFillGray(0.72)
         c.setLineWidth(0.8)
-        if mh["shape"] == "square":
-            c.rect(mx - rw / 2, y_top, rw, rh, stroke=1, fill=1)
-            c.setFillGray(0.45)
-            c.rect(mx - rw / 2 - 1.2, y_top + rh - 2.4, rw + 2.4, 2.4, stroke=1, fill=1)
-        else:
-            ry = max(rw * 0.16, 1.4)                   # lid seen slightly from the side
-            c.rect(mx - rw / 2, y_top, rw, rh - ry, stroke=1, fill=1)
-            c.setFillGray(0.45)
-            c.ellipse(mx - rw / 2 - 1.2, y_top + rh - 2 * ry, mx + rw / 2 + 1.2, y_top + rh,
-                      stroke=1, fill=1)
+        c.rect(mx - rw / 2, y_top, rw, rh, stroke=1, fill=1)
+        c.setFillGray(0.45)
+        c.rect(mx - rw / 2 - 1.2, y_top + rh - 2.4, rw + 2.4, 2.4, stroke=1, fill=1)
         risers.append(mx)
         riser_boxes.append((mx - rw / 2 - 2, y_top, mx + rw / 2 + 2, y_top + rh + 3))
 
@@ -253,9 +251,14 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
         c.setStrokeColor(colors.red if p["kind"] == "INLET" else colors.blue)
         c.circle(face_cx(p), y0 + p["z"] * s, max(p["diameter"] * s, 3.5) / 2 + 0.6, stroke=1, fill=1)
 
-    stub_items = []                                    # (wall x, direction, y, group) for the callouts
+    stub_items = []                                    # (wall x, direction, y, callout lines)
     for sd, xw, sgn, compass in ((side_l, x0, -1, "WEST"), (side_r, x1, 1, "EAST")):
-        for g in _stub_groups([q for q in d["pipes"] if q["side"] == sd]):
+        wall = [q for q in d["pipes"] if q["side"] == sd]
+        for lvl in _stub_labels(wall):                 # one callout per level, beside the middle of its stubs
+            lo = min(q["z"] - q["diameter"] / 2 for q in lvl)
+            hi = max(q["z"] + q["diameter"] / 2 for q in lvl)
+            stub_items.append((xw, sgn, y0 + (lo + hi) / 2 * s, group_lines(lvl)))
+        for g in _stub_groups(wall):
             ph, py = max(g["p"]["diameter"] * s, 3.5), y0 + g["p"]["z"] * s
             c.setFillGray(0.75)
             c.setStrokeColor(colors.black)
@@ -264,7 +267,6 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
             for k, kind in enumerate(g["kinds"]):      # inlet + outlet share a stub: arrows side by side
                 off = 0 if len(g["kinds"]) == 1 else (3.5 if k % 2 == 0 else -3.5)
                 draw_flow_arrow(c, xw, py + off, compass, kind, pipe_extension=STUB)
-            stub_items.append((xw, sgn, py, g))
 
     c.setStrokeColor(colors.black)
     c.setFillColor(colors.black)
@@ -351,8 +353,6 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
         keep.append((ax - 24 - fw, y_fsl + 9, ax - 20, y_fsl + 22))
 
     # ---- pipe callouts (same text as the plan view) ----------------------------------
-    pipe_lines = _pipe_lines
-
     def masked(box):
         c.setFillColor(colors.white)
         c.rect(box[0], box[1], box[2] - box[0], box[3] - box[1], stroke=0, fill=1)
@@ -365,24 +365,25 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
 
     # side-on stubs: the callout sits beyond the flow arrow, level with the stub; when that spot
     # is taken (a dimension line, another callout) it slides up / down and a short leader links it
-    for xw, sgn, py, g in stub_items:
-        lines = pipe_lines("/".join(g["kinds"]), g["p"])
+    for xw, sgn, py, lines in stub_items:
+        n = len(lines)
+        mid = 4 * n - 7                                   # first baseline above the block's vertical centre
         w = max(stringWidth(t, FN, LS) for t in lines)
         edge = xw + sgn * 51                              # text edge nearest the arrow tip
         xl = edge if sgn > 0 else edge - w
         spots = [0] + [k * 4 * sg for k in range(1, 25) for sg in (1, -1)]
         link = lambda dy: ((xw + sgn * 49, py), (edge - sgn * 1.5, py + dy))
         # first choice: a spot whose leader crosses nothing; then any clear spot; then a mask
-        found = next(((dy, block_box(xl, py + dy + MID, w, NL)) for strict in (True, False) for dy in spots
-                      if clear(block_box(xl, py + dy + MID, w, NL)) and
+        found = next(((dy, block_box(xl, py + dy + mid, w, n)) for strict in (True, False) for dy in spots
+                      if clear(block_box(xl, py + dy + mid, w, n)) and
                       not (strict and abs(dy) > 5 and any(_seg_hits_box(*link(dy), o) for o in keep))), None)
         if found:
             dy, box = found
         else:
-            dy, box = 0, block_box(xl, py + MID, w, NL)
+            dy, box = 0, block_box(xl, py + mid, w, n)
             masked(box)
         keep.append(box)
-        text_block(c, edge, py + dy + MID, lines, size=LS, align="r" if sgn < 0 else "l", leading=LD)
+        text_block(c, edge, py + dy + mid, lines, size=LS, align="r" if sgn < 0 else "l", leading=LD)
         if abs(dy) > 5:
             c.setStrokeColor(colors.black)
             c.setLineWidth(0.5)
@@ -390,19 +391,24 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
 
     # pipe ends on the face: callouts in rows under the tank (staggered when several), each with a
     # leader up to its pipe - drawn white where it crosses the black cube faces
+    # pipes on one line (same position) share ONE callout; its leader runs up to the lowest pipe
+    # and on through the others on that line
     rows = label_rows(d, view)
+    row_h = _row_h(d, view)
     top0 = y0 - (36 if span_dim else 14)                  # top of the first row
     used = 0
-    for kind, p in sorted(_face_items(d, view), key=lambda t: (face_cx(t[1]), t[1]["z"])):
-        lines = pipe_lines(kind, p)
+    for grp in sorted(_face_groups(d, view), key=lambda g: face_cx(g[0])):
+        lines = group_lines(grp)
+        n = len(lines)
         w = max(stringWidth(t, FN, LS) for t in lines)
-        cx = face_cx(p)
-        tip = (cx, y0 + p["z"] * s - max(p["diameter"] * s, 3.5) / 2 - 0.6)
+        cx = face_cx(grp[0])
+        bottoms = [y0 + q["z"] * s - max(q["diameter"] * s, 3.5) / 2 - 0.6 for q in grp]
+        tip = (cx, min(bottoms))
         pick = None
         for r in range(rows):
-            base_y = top0 - r * ROW_H - LS
+            base_y = top0 - r * row_h - LS
             for sh in [0] + [k * 8 * sg for k in range(1, 21) for sg in (1, -1)]:
-                box = block_box(cx + sh - w / 2, base_y, w, NL)
+                box = block_box(cx + sh - w / 2, base_y, w, n)
                 seg = ((cx + sh, base_y + LS + 2), tip)
                 if clear(box) and not any(_seg_hits_box(*seg, o) for o in keep) \
                         and not any(_seg_hits_box(a, b, box) for a, b in below_leaders):
@@ -412,7 +418,7 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
                 break
         if pick is None:                                  # no clear spot: first row, over a mask
             base_y = top0 - LS
-            box = block_box(cx - w / 2, base_y, w, NL)
+            box = block_box(cx - w / 2, base_y, w, n)
             masked(box)
             pick = (cx, base_y, box, ((cx, base_y + LS + 2), tip), 0)
         tx, base_y, box, (a, b), r = pick
@@ -426,6 +432,8 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
         else:
             m = (a[0] + (b[0] - a[0]) * (y0 - a[1]) / (b[1] - a[1]), y0)
             parts = [(a, m, colors.black), (m, b, colors.white)]
+        if max(bottoms) > b[1] + 1:                       # more pipes on this line, higher up
+            parts.append(((cx, b[1]), (cx, max(bottoms)), colors.white))
         for p1, p2, col_ in parts:
             c.setStrokeColor(col_)
             c.line(p1[0], p1[1], p2[0], p2[1])
@@ -510,8 +518,9 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
         dim_h(c, x0, x1, y0 - 26, f"{span:.0f}", ext_to=y0 - 9)
     if title:
         underlined_title(c, f"{view.upper()} ELEVATION VIEW", x0 + tw / 2,
-                         y0 - (48 if span_dim else 34) - ROW_H * used, size=14 if span_dim else 11)
-    return {"top": y_top, "fsl": y_fsl}
+                         y0 - (48 if span_dim else 34) - row_h * used, size=14 if span_dim else 11)
+    return {"top": y_top, "fsl": y_fsl, "used_top": max([y_fsl] + [b[3] for b in keep]),
+            "used_x": (min([x0] + [b[0] for b in keep]), max([x1] + [b[2] for b in keep]))}
 
 
 # ======================================================
