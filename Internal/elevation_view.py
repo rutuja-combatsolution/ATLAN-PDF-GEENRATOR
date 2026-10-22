@@ -375,7 +375,7 @@ def draw_elevation_view(c, d, x0, y0, s, view="front", span_dim=False, title=Tru
         c.rect(box[0], box[1], box[2] - box[0], box[3] - box[1], stroke=0, fill=1)
 
     # base RL
-    base_box = text_block(c, x0 - 34, y0 - 20, ["ATLAN CUBE", f"BASE RL: {fmt_rl(d['base_rl'])}"],
+    base_box = text_block(c, x0 - 34, y0 - 20, ["AtlanCube", f"BASE RL: {fmt_rl(d['base_rl'])}"],
                           size=7, align="r", leading=8)
     keep.append(base_box)
     leader(c, x0 - 32, y0 - 17.6, x0 + 3, y0 - 1)

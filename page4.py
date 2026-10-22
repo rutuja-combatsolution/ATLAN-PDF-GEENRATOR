@@ -1,6 +1,4 @@
-# page4.py — Page 4 content: Bill of Materials (tank components) with a View column.
-
-import os
+# page4.py — Page 4 content: Bill of Materials (tank components).
 
 from reportlab.lib.colors import black, HexColor
 from reportlab.lib.units import mm
@@ -17,30 +15,13 @@ FN, FB = "Helvetica", "Helvetica-Bold"
 GREY   = HexColor("#888888")
 RULE   = HexColor("#DDDDDD")
 
-# View | Item | Category | Quantity | Unit
-COL_PROPS = [0.22, 0.34, 0.20, 0.12, 0.12]
-HEADERS   = ["View", "Item", "Category", "Quantity", "Unit"]
-
-
-def _view(c, x, y, w, h, path=""):
-    """Component picture, or a dashed placeholder box until one is supplied."""
-    if path and os.path.isfile(path):
-        c.drawImage(path, x, y, width=w, height=h,
-                    preserveAspectRatio=True, anchor="c", mask="auto")
-        return
-    c.setStrokeColor(GREY)
-    c.setLineWidth(0.6)
-    c.setDash(3, 2)
-    c.rect(x, y, w, h)
-    c.setDash()
-    c.setFont(FN, 7)
-    c.setFillColor(GREY)
-    c.drawCentredString(x + w / 2, y + h / 2 - 2.5, "VIEW PLACEHOLDER")
-    c.setFillColor(black)
+# Item | Category | Quantity | Unit
+COL_PROPS = [0.45, 0.25, 0.15, 0.15]
+HEADERS   = ["Item", "Category", "Quantity", "Unit"]
 
 
 def draw_page4_components(c, components, project_name=""):
-    """components: list of {"item", "category", "quantity", "unit", "view"(optional image path)}."""
+    """components: list of {"item", "category", "quantity", "unit"}."""
     PAD    = 6 * mm
     HEAD_H = 16 * mm
     HDR_H  = 10 * mm
@@ -54,7 +35,7 @@ def draw_page4_components(c, components, project_name=""):
 
     card_top = top - 34
     n        = max(len(components), 1)
-    row_h    = min(22 * mm, (card_top - TBAR_TOP - 12 * mm - HEAD_H - HDR_H) / n)
+    row_h    = min(12 * mm, (card_top - TBAR_TOP - 12 * mm - HEAD_H - HDR_H) / n)
     card_h   = HEAD_H + HDR_H + n * row_h + 4 * mm
 
     c.setStrokeColor(RULE)
@@ -95,16 +76,12 @@ def draw_page4_components(c, components, project_name=""):
         row_bot = row_top - row_h
         mid_y   = row_bot + row_h / 2 - 3.5
 
-        vh = row_h - 6 * mm
-        _view(c, cols[0] + 2 * mm, row_bot + 3 * mm,
-              min(40 * mm, cols[1] - cols[0] - 4 * mm), vh, comp.get("view", ""))
-
         c.setFillColor(black)
         c.setFont(FN, 10)
-        c.drawString(cols[1] + 2 * mm, mid_y, str(comp.get("item", "")))
-        c.drawString(cols[2] + 2 * mm, mid_y, str(comp.get("category", "")))
-        c.drawRightString(cols[4] - PAD, mid_y, str(comp.get("quantity", "")))
-        c.drawString(cols[4] + 2 * mm, mid_y, str(comp.get("unit", "")))
+        c.drawString(cols[0] + 2 * mm, mid_y, str(comp.get("item", "")))
+        c.drawString(cols[1] + 2 * mm, mid_y, str(comp.get("category", "")))
+        c.drawRightString(cols[3] - PAD, mid_y, str(comp.get("quantity", "")))
+        c.drawString(cols[3] + 2 * mm, mid_y, str(comp.get("unit", "")))
 
         c.setStrokeColor(RULE)
         c.line(tx, row_bot, tx + tw, row_bot)

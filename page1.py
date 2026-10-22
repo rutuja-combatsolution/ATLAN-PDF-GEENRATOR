@@ -20,6 +20,7 @@ from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
+from data_mapper import fmt_rl
 from Internal.plan_view import draw_plan_view, plan_margins, FN, FB
 from Internal.elevation_view import (draw_elevation_view, left_need, elev_base, right_need,
                                       ELEV_ABOVE)
@@ -138,7 +139,7 @@ def _site_h(k):
     return (22 + 7 * 15) * k
 
 
-def _site_level(c, x, top, k):
+def _site_level(c, x, top, d, k):
     w = RIGHT_W
     title_h, row_h = 22 * k, 15 * k
     h = _site_h(k)
@@ -152,7 +153,7 @@ def _site_level(c, x, top, k):
     c.line(x, t_bot, x + w, t_bot)
     for i in range(1, 7):
         c.line(x, t_bot - i * row_h, x + w, t_bot - i * row_h)
-    div = x + w * 0.75
+    div = x + w * 0.58                       # value column wide enough for two or three inverts
     foot_div = x + w * 0.30
     c.line(div, t_bot, div, t_bot - 4 * row_h)
     c.line(foot_div, bot, foot_div, t_bot - 4 * row_h)
@@ -161,15 +162,21 @@ def _site_level(c, x, top, k):
     c.setFont(FB, fs_t)
     c.drawCentredString(x + w / 2, top - title_h / 2 - fs_t * 0.35, "Site Level Confirmation")
 
-    rows = [("Finished Surface Level (FSL)", "RL:", "l"), ("Access Cover Thickness", "mm", "r"),
-            ("Inlet Invert Level", "RL:", "l"), ("Outlet Invert Level", "RL:", "l")]
+    def rl(kind):   # every distinct invert of that kind, highest first; bare "RL:" when the tank has none
+        ils = sorted({p["il"] for p in d["pipes"] if p["kind"] == kind}, reverse=True)
+        return "RL: " + " / ".join(fmt_rl(v) for v in ils) if ils else "RL:"
+
+    rows = [("Finished Surface Level (FSL)", f"RL: {fmt_rl(d['fsl'])}", "l"),
+            ("Access Cover Thickness", "mm", "r"),                      # left blank for the site to fill in
+            ("Inlet Invert Level", rl("INLET"), "l"), ("Outlet Invert Level", rl("OUTLET"), "l")]
     fs = min(8.5 * min(k, 1.15),
              (div - x - 8) / max(stringWidth(r[0], FN, 1) for r in rows))
-    c.setFont(FN, fs)
     for i, (lbl, val, al) in enumerate(rows):
+        c.setFont(FN, fs)
         yy = t_bot - (i + 0.5) * row_h - fs * 0.35
         c.drawRightString(div - 3, yy, lbl)
         if al == "l":
+            c.setFont(FN, min(fs, (x + w - div - 6) / stringWidth(val, FN, 1)))   # shrink to the cell
             c.drawString(div + 3, yy, val)
         else:
             c.drawRightString(x + w - 3, yy, val)
@@ -224,7 +231,7 @@ def _draw_column(c, d):
     y -= _capacity_h(k) + gap
     _parts_list(c, RIGHT_X, y, d["parts_list"], k)
     y -= _parts_h(n, k) + gap
-    _site_level(c, RIGHT_X, y, k)
+    _site_level(c, RIGHT_X, y, d, k)
     y -= _site_h(k) + gap
     _notes(c, RIGHT_X, y, k)                    # plain text goes after the three tables
     # stamp keeps the bottom of the column, just above the title block
