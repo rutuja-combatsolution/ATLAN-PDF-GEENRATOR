@@ -32,8 +32,7 @@ IY0, IY1 = IM, PH - IM
 TB_TOP = IY0 + 45 * mm                      # top of the title block
 TBAR_TOP = TB_TOP + 6 * mm                  # top of the tolerance bar
 
-NOTES = ["NOTES:",
-         "1. THE EXCAVATION MUST HAVE A MINIMUM OF",
+NOTES = ["1. THE EXCAVATION MUST HAVE A MINIMUM OF",
          "    500mm CLEARANCE AROUND THE ENTIRETY OF THE TANK OR",
          "    AS REQUIRED ON-SITE.",
          "2. ACCESS MANHOLES Ø375 ROUND LIDS - CLASS 'D' (BY ATLAN)",
@@ -54,21 +53,29 @@ GAP_MIN = 14
 # ----------------------------------------------------------------------------------
 
 def _notes_fs():
-    return min(9.5, (RIGHT_W - 4) / max(stringWidth(t, FN, 1) for t in NOTES))
+    return min(9.5, (RIGHT_W - 8) / max(stringWidth(t, FN, 1) for t in NOTES))
 
 
 def _notes_h(k):
-    fs = _notes_fs()
-    return fs + (len(NOTES) - 1) * fs * 1.28 * k + 3
+    return (16 + len(NOTES) * _notes_fs() * 1.28 + 8) * k
 
 
 def _notes(c, x, top, k):
-    fs = _notes_fs()
+    """Table like the parts list: NOTES title row, then one row holding both points."""
+    fs, w, title_h, h = _notes_fs(), RIGHT_W, 16 * k, _notes_h(k)
     lead = fs * 1.28 * k
+    c.setStrokeColor(black)
     c.setFillColor(black)
+    c.setLineWidth(1.2)
+    c.rect(x, top - h, w, h, stroke=1, fill=0)
+    c.setLineWidth(0.5)
+    c.line(x, top - title_h, x + w, top - title_h)
+    fs_t = 8.0 * min(k, 1.15)
+    c.setFont(FN, fs_t)
+    c.drawCentredString(x + w / 2, top - title_h / 2 - fs_t * 0.35, "NOTES")
+    c.setFont(FN, fs)
     for i, t in enumerate(NOTES):
-        c.setFont(FB if i == 0 else FN, fs)
-        c.drawString(x + 2, top - fs - i * lead, t)
+        c.drawString(x + 4, top - title_h - 4 * k - fs - i * lead, t)
 
 
 def _capacity_h(k):
@@ -136,7 +143,7 @@ def _parts_list(c, x, top, rows, k):
 
 
 def _site_h(k):
-    return (22 + 7 * 15) * k
+    return (22 + 3 * 15) * k
 
 
 def _site_level(c, x, top, d, k):
@@ -151,37 +158,39 @@ def _site_level(c, x, top, d, k):
     c.setLineWidth(0.5)
     t_bot = top - title_h
     c.line(x, t_bot, x + w, t_bot)
-    for i in range(1, 7):
+    for i in range(1, 3):
         c.line(x, t_bot - i * row_h, x + w, t_bot - i * row_h)
-    div = x + w * 0.58                       # value column wide enough for two or three inverts
-    foot_div = x + w * 0.30
-    c.line(div, t_bot, div, t_bot - 4 * row_h)
-    c.line(foot_div, bot, foot_div, t_bot - 4 * row_h)
+    c.line(x + w * 0.30, bot, x + w * 0.30, t_bot)
 
     fs_t = 11 * min(k, 1.2)
     c.setFont(FB, fs_t)
     c.drawCentredString(x + w / 2, top - title_h / 2 - fs_t * 0.35, "Site Level Confirmation")
-
-    def rl(kind):   # every distinct invert of that kind, highest first; bare "RL:" when the tank has none
-        ils = sorted({p["il"] for p in d["pipes"] if p["kind"] == kind}, reverse=True)
-        return "RL: " + " / ".join(fmt_rl(v) for v in ils) if ils else "RL:"
-
-    rows = [("Finished Surface Level (FSL)", f"RL: {fmt_rl(d['fsl'])}", "l"),
-            ("Access Cover Thickness", "mm", "r"),                      # left blank for the site to fill in
-            ("Inlet Invert Level", rl("INLET"), "l"), ("Outlet Invert Level", rl("OUTLET"), "l")]
-    fs = min(8.5 * min(k, 1.15),
-             (div - x - 8) / max(stringWidth(r[0], FN, 1) for r in rows))
-    for i, (lbl, val, al) in enumerate(rows):
-        c.setFont(FN, fs)
-        yy = t_bot - (i + 0.5) * row_h - fs * 0.35
-        c.drawRightString(div - 3, yy, lbl)
-        if al == "l":
-            c.setFont(FN, min(fs, (x + w - div - 6) / stringWidth(val, FN, 1)))   # shrink to the cell
-            c.drawString(div + 3, yy, val)
-        else:
-            c.drawRightString(x + w - 3, yy, val)
+    fs = 8.5 * min(k, 1.15)
+    c.setFont(FN, fs)
     for i, lbl in enumerate(["Company:", "Name:", "Date:"]):
-        c.drawString(x + 3, t_bot - (4 + i + 0.5) * row_h - fs * 0.35, lbl)
+        c.drawString(x + 3, t_bot - (i + 0.5) * row_h - fs * 0.35, lbl)
+
+
+def _info_h(k):
+    return (5 * 10.4 + 3) * k
+
+
+def _info_box(c, x, top, d, k):
+    """Module / stack summary, boxed across the column width."""
+    info = ["AtlanCube 1000L MODULE",
+            f"({d['cubes_wide']}-CUBES ROW x {d['cubes_long']}-CUBES LONG)",
+            d["stack_label"],
+            f"FSL {fmt_rl(d['fsl'])}",
+            f"TOP OF STORAGE RL {fmt_rl(d['top_rl'])}"]
+    h, lead = _info_h(k), 10.4 * k
+    fs = min(7.5 * k, (RIGHT_W - 8) / max(stringWidth(t, FN, 1) for t in info))
+    c.setStrokeColor(black)
+    c.setLineWidth(0.8)
+    c.rect(x, top - h, RIGHT_W, h, stroke=1, fill=0)
+    c.setFont(FN, fs)
+    c.setFillColor(black)
+    for i, t in enumerate(info):
+        c.drawCentredString(x + RIGHT_W / 2, top - lead * (i + 1) + 1.5 * k, t)
 
 
 def _stamp_h(k):
@@ -216,24 +225,24 @@ def _stamp(c, x, y, w, k):
 def _draw_column(c, d):
     """Draw the right-hand column, scaled to span COL_TOP .. COL_BOTTOM."""
     n = len(d["parts_list"])
-    avail = COL_TOP - COL_BOTTOM - 4 * GAP_MIN
-    # heights are linear in k apart from the fixed part of the notes block
+    avail = COL_TOP - COL_BOTTOM - 5 * GAP_MIN
+    # block heights are all linear in k
     fs = _notes_fs()
-    fixed = fs + 3
-    per_k = 19 + (len(NOTES) - 1) * fs * 1.28 + (29 + 12.5 * max(n, 1)) + (22 + 105) + 32
-    k = max(1.0, min(KMAX, (avail - fixed) / per_k))
-    gap = (COL_TOP - COL_BOTTOM - (_capacity_h(k) + _notes_h(k) + _parts_h(n, k)
-                                   + _site_h(k) + _stamp_h(k))) / 4
-    gap = min(gap, 60)
+    per_k = 19 + 5 * 10.4 + 16 + len(NOTES) * fs * 1.28 + 8 + (29 + 12.5 * max(n, 1)) + (22 + 45) + 32
+    k = max(1.0, min(KMAX, avail / per_k))
+    gap = (COL_TOP - COL_BOTTOM - (_capacity_h(k) + _info_h(k) + _notes_h(k) + _parts_h(n, k)
+                                   + _site_h(k) + _stamp_h(k))) / 5       # one gap between every block
 
     y = COL_TOP
     _capacity_box(c, RIGHT_X, y, f"TANK STORAGE CAPACITY: {d['tank_storage']:g}m3", k)
     y -= _capacity_h(k) + gap
+    _info_box(c, RIGHT_X, y, d, k)
+    y -= _info_h(k) + gap
     _parts_list(c, RIGHT_X, y, d["parts_list"], k)
     y -= _parts_h(n, k) + gap
     _site_level(c, RIGHT_X, y, d, k)
     y -= _site_h(k) + gap
-    _notes(c, RIGHT_X, y, k)                    # plain text goes after the three tables
+    _notes(c, RIGHT_X, y, k)
     # stamp keeps the bottom of the column, just above the title block
     sw = min(RIGHT_W, 232)
     _stamp(c, RIGHT_X + (RIGHT_W - sw) / 2, COL_BOTTOM, sw, k)

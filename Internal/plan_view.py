@@ -508,31 +508,7 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
     c.rect(gx - PIPE_STUB + 6, gy + 1.5, PIPE_STUB - 6, 3, stroke=1, fill=1)
     agg_anchor = (gx - PIPE_STUB + 6, gy + 3)
 
-    # ---- centre information box --------------------------------------------
-    cap = f"{d['tank_storage']:g}m3"
-    info = ["AtlanCube 1000L MODULE",
-            f"({d['cubes_wide']}-CUBES ROW x {d['cubes_long']}-CUBES LONG)",
-            d["stack_label"],
-            f"FSL {fmt_rl(d['fsl'])}",
-            f"TOP OF STORAGE RL {fmt_rl(d['top_rl'])}",
-            f"TOTAL STORAGE CAPACITY: {cap}"]
-    fs, lead = 9, 10.4
-    bw = max(stringWidth(t, FN, fs) for t in info) + 8
-    bh = lead * len(info) + 3
-    bx = gx + L / 2 - bw / 2
     chain_y = red[1] - ((ARROW_OUT + 16) if "bottom" in sides else 14)
-
-    # a narrow tank cannot hold the box: hang it under the dimension chain instead
-    narrow_tank = W < bh + 10
-    by = (chain_y - 14 - bh) if narrow_tank else (gy + W / 2 - bh / 2)
-    c.setFillColor(colors.white)
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(0.6)
-    c.rect(bx, by, bw, bh, stroke=1, fill=1)
-    for i, t in enumerate(info):
-        c.setFont(FN, fs)
-        c.setFillColor(colors.black)
-        c.drawCentredString(gx + L / 2, by + bh - lead * (i + 1) + 1.5, t)
 
     # ---- dimensions: excavation length / module length (top rows) --------------
     top_base = red[3] + (ARROW_OUT if "top" in sides else 8)
@@ -626,10 +602,8 @@ def draw_plan_view(c, d, x0, y0, s, floor_y=None):
         for yb in ys:
             keep_out(x_chain, gy + yb * s - 0.9, gx - 7.5, gy + yb * s + 0.9)
 
-    # info box when it hangs below a narrow tank, and the PLAN VIEW title
-    title_y = (by - 18) if narrow_tank else (chain_y - 34)
-    if narrow_tank:
-        keep_out(bx, by, bx + bw, by + bh)
+    # the PLAN VIEW title
+    title_y = chain_y - 34
     t_w = stringWidth("PLAN VIEW", FB, 11)
     keep_out(gx + L / 2 - t_w / 2 - 2, title_y - 5, gx + L / 2 + t_w / 2 + 2, title_y + 13)
     if floor_y is not None:                                   # nothing may reach into the elevation
